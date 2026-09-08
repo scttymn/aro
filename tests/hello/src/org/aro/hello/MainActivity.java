@@ -12,6 +12,9 @@ import java.io.InputStream;
 import java.net.URL;
 import javax.net.ssl.HttpsURLConnection;
 import android.os.Environment;
+import android.media.AudioAttributes;
+import android.media.AudioFormat;
+import android.media.AudioTrack;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.BufferedReader;
@@ -65,7 +68,7 @@ public class MainActivity extends Activity {
             @Override public void onClick(View v) {
                 taps++;
                 Log.i(TAG, "click " + taps + " -> startActivity(SecondActivity)");
-                startActivity(new Intent(MainActivity.this, SecondActivity.class));
+                startActivity(new Intent("org.aro.hello.action.SHOW"));
                 root.setBackgroundColor(colors[taps % colors.length]);
                 tv.setText("Tapped " + taps);
                 NotificationManager nm = getSystemService(NotificationManager.class);
@@ -82,6 +85,7 @@ public class MainActivity extends Activity {
         probeStorage();
         probeNetwork();
     }
+
 
     private void probeStorage() {
         try {

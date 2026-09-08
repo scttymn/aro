@@ -137,11 +137,27 @@ impl ActivityService {
                 return;
             }
             _ => {
-                // Implicit intent: resolve against this app's launcher for now.
-                log::warn!("activity: implicit startActivity (action={action:?}) — resolving to main activity");
-                match spec.main_activity.clone() {
-                    Some(m) => m,
-                    None => return,
+                // Implicit intent: match this app's activities' <intent-filter>s by action.
+                // startActivity implies CATEGORY_DEFAULT, so the filter must declare it.
+                let Some(act) = action.as_deref() else {
+                    log::warn!("activity: implicit startActivity with no action");
+                    return;
+                };
+                let matched = spec.activities.iter().find(|a| {
+                    a.filters.iter().any(|f| {
+                        f.actions.iter().any(|x| x == act)
+                            && f.categories.iter().any(|c| c == "android.intent.category.DEFAULT")
+                    })
+                });
+                match matched {
+                    Some(a) => {
+                        log::info!("activity: implicit {act:?} resolved to {}", a.name);
+                        a.name.clone()
+                    }
+                    None => {
+                        log::warn!("activity: no activity matches implicit action {act:?}");
+                        return;
+                    }
                 }
             }
         };

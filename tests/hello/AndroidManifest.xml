@@ -11,6 +11,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <activity android:name=".SecondActivity" android:exported="true" />
+        <activity android:name=".SecondActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="org.aro.hello.action.SHOW" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
     </application>
 </manifest>

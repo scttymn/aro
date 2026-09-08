@@ -10,6 +10,9 @@ pub mod attr {
     pub const LABEL: u32 = 0x0101_0001;
     pub const ICON: u32 = 0x0101_0002;
     pub const NAME: u32 = 0x0101_0003;
+    pub const MIME_TYPE: u32 = 0x0101_0026;
+    pub const SCHEME: u32 = 0x0101_0027;
+    pub const HOST: u32 = 0x0101_0028;
     pub const DEBUGGABLE: u32 = 0x0101_000f;
     pub const EXPORTED: u32 = 0x0101_0010;
     pub const PROCESS: u32 = 0x0101_0011;
@@ -28,6 +31,15 @@ pub mod attr {
 }
 
 #[derive(Clone, Debug, Default)]
+pub struct IntentFilter {
+    pub actions: Vec<String>,
+    pub categories: Vec<String>,
+    pub schemes: Vec<String>,
+    pub hosts: Vec<String>,
+    pub mime_types: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default)]
 pub struct ActivityDecl {
     pub name: String,
     pub theme: u32,
@@ -38,6 +50,7 @@ pub struct ActivityDecl {
     pub soft_input_mode: i32,
     pub task_affinity: Option<String>,
     pub launcher: bool,
+    pub filters: Vec<IntentFilter>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -100,10 +113,17 @@ pub fn parse_manifest(data: &[u8]) -> Result<Manifest> {
         m.app_component_factory = app.attr(attr::APP_COMPONENT_FACTORY, "appComponentFactory").and_then(|v| v.as_str()).map(String::from);
         for a in app.children_named("activity").chain(app.children_named("activity-alias")) {
             let Some(name) = a.attr(attr::NAME, "name").and_then(|v| v.as_str()) else { continue };
-            let launcher = a.children_named("intent-filter").any(|f| {
-                f.children_named("action").any(|x| x.attr(attr::NAME, "name").and_then(|v| v.as_str()) == Some("android.intent.action.MAIN"))
-                    && f.children_named("category").any(|x| x.attr(attr::NAME, "name").and_then(|v| v.as_str()) == Some("android.intent.category.LAUNCHER"))
-            });
+            let names = |f: &crate::axml::Element, tag: &str| -> Vec<String> {
+                f.children_named(tag).filter_map(|x| x.attr(attr::NAME, "name").and_then(|v| v.as_str()).map(String::from)).collect()
+            };
+            let filters: Vec<IntentFilter> = a.children_named("intent-filter").map(|f| IntentFilter {
+                actions: names(f, "action"),
+                categories: names(f, "category"),
+                schemes: f.children_named("data").filter_map(|d| d.attr(attr::SCHEME, "scheme").and_then(|v| v.as_str()).map(String::from)).collect(),
+                hosts: f.children_named("data").filter_map(|d| d.attr(attr::HOST, "host").and_then(|v| v.as_str()).map(String::from)).collect(),
+                mime_types: f.children_named("data").filter_map(|d| d.attr(attr::MIME_TYPE, "mimeType").and_then(|v| v.as_str()).map(String::from)).collect(),
+            }).collect();
+            let launcher = filters.iter().any(|f| f.actions.iter().any(|x| x == "android.intent.action.MAIN") && f.categories.iter().any(|x| x == "android.intent.category.LAUNCHER"));
             m.activities.push(ActivityDecl {
                 name: qualify(&m.package, name),
                 theme: a.attr(attr::THEME, "theme").and_then(|v| v.as_int()).unwrap_or(0) as u32,
@@ -114,6 +134,7 @@ pub fn parse_manifest(data: &[u8]) -> Result<Manifest> {
                 soft_input_mode: a.attr(attr::WINDOW_SOFT_INPUT_MODE, "windowSoftInputMode").and_then(|v| v.as_int()).unwrap_or(0),
                 task_affinity: a.attr(attr::TASK_AFFINITY, "taskAffinity").and_then(|v| v.as_str()).map(String::from),
                 launcher,
+                filters,
             });
         }
     }
