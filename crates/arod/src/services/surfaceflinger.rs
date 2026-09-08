@@ -267,7 +267,7 @@ fn write_release_channel(fd: &OwnedFd, pb: &PostedBuffer) -> std::io::Result<()>
     m.extend_from_slice(&((pb.gb_id >> 32) as u32).to_le_bytes());
     m.extend_from_slice(&(pb.frame_number as u32).to_le_bytes());
     m.extend_from_slice(&((pb.frame_number >> 32) as u32).to_le_bytes());
-    m.extend_from_slice(&1u32.to_le_bytes()); // maxAcquiredBufferCount
+    m.extend_from_slice(&u32::MAX.to_le_bytes()); // maxAcquiredBufferCount: nullopt
     let rc = unsafe { libc::send(fd.as_raw_fd(), m.as_ptr() as *const _, m.len(), libc::MSG_DONTWAIT | libc::MSG_NOSIGNAL) };
     if rc < 0 {
         return Err(std::io::Error::last_os_error());
@@ -275,7 +275,7 @@ fn write_release_channel(fd: &OwnedFd, pb: &PostedBuffer) -> std::io::Result<()>
     Ok(())
 }
 
-/// ITransactionCompletedListener.onReleaseBuffer(ReleaseCallbackId, Fence, maxAcquiredBufferCount), oneway.
+/// ITransactionCompletedListener.onReleaseBuffer(ReleaseCallbackId, Fence, maxAcquiredBufferCount, releasePreviousBuffer), oneway.
 pub fn release_buffer(pb: &PostedBuffer) {
     if let Some(ch) = pb.channel.lock().unwrap().as_ref() {
         match write_release_channel(ch, pb) {
@@ -294,7 +294,8 @@ pub fn release_buffer(pb: &PostedBuffer) {
         d.write_i32(4)?;
         d.write_i32(0)?;
         d.write_u32(0)?;
-        d.write_u32(1)?; // currentMaxAcquiredBufferCount
+        d.write_u32(u32::MAX)?; // currentMaxAcquiredBufferCount: nullopt (std::nullopt in C++)
+        d.write_bool(false)?; // releasePreviousBuffer: bool (false)
         proxy.submit_transact(2, &d, rsbinder::FLAG_ONEWAY)?; // ON_RELEASE_BUFFER
         Ok(())
     })();
