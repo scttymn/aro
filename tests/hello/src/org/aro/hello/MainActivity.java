@@ -11,6 +11,11 @@ import android.net.NetworkInfo;
 import java.io.InputStream;
 import java.net.URL;
 import javax.net.ssl.HttpsURLConnection;
+import android.os.Environment;
+import java.io.File;
+import java.io.FileWriter;
+import java.io.BufferedReader;
+import java.io.FileReader;
 import android.content.Context;
 import android.graphics.Color;
 import android.os.Bundle;
@@ -72,7 +77,29 @@ public class MainActivity extends Activity {
             }
         });
         setContentView(root);
+        probeStorage();
         probeNetwork();
+    }
+
+    private void probeStorage() {
+        try {
+            File priv = new File(getFilesDir(), "aro-private.txt");
+            FileWriter w = new FileWriter(priv);
+            w.write("private-ok"); w.close();
+            BufferedReader r = new BufferedReader(new FileReader(priv));
+            Log.i(TAG, "storage: private " + priv + " -> " + r.readLine());
+            r.close();
+        } catch (Exception e) { Log.w(TAG, "storage: private failed: " + e); }
+        Log.i(TAG, "storage: externalState=" + Environment.getExternalStorageState());
+        try {
+            File sd = Environment.getExternalStorageDirectory();
+            String[] list = sd.list();
+            Log.i(TAG, "storage: /sdcard=" + sd + " entries=" + (list == null ? "null" : list.length));
+            File out = new File(sd, "aro-hello.txt");
+            FileWriter w = new FileWriter(out);
+            w.write("hello from ARO to the host home"); w.close();
+            Log.i(TAG, "storage: wrote " + out);
+        } catch (Exception e) { Log.w(TAG, "storage: /sdcard failed: " + e); }
     }
 
     private void probeNetwork() {

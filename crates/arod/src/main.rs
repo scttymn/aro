@@ -143,6 +143,7 @@ fn main() -> Result<()> {
     let vendor_dir = prepare_vendor_dir(&layout)?;
     services::publish(&hub_impl, "accessibility", services::accessibility::AccessibilityService);
     services::publish(&hub_impl, "user", services::user::UserService);
+    services::publish(&hub_impl, "mount", services::storage::StorageService);
     services::publish(&hub_impl, "sensorservice", services::sensor::SensorService);
     services::publish(&hub_impl, "media.camera", services::camera::CameraService);
     services::publish(&hub_impl, "package", services::package::PackageService { registry: registry.clone() });
@@ -164,6 +165,11 @@ fn main() -> Result<()> {
     cmd.env(Session::ENV_BINDERFS, &session.binderfs).env(Session::ENV_SOCKETS, &session.sockets);
     if let Some(v) = &vendor_dir {
         cmd.env("ARO_VENDOR_DIR", v);
+    }
+    // External storage maps to a host directory: ARO_SDCARD, else the user's home.
+    let sdcard = std::env::var_os("ARO_SDCARD").or_else(|| std::env::var_os("HOME"));
+    if let Some(sd) = sdcard {
+        cmd.env("ARO_SDCARD", sd);
     }
     match cli.cmd {
         Cmd::Run { apk, class, method } => {

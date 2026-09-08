@@ -24,6 +24,8 @@ pub mod notification_codes;
 pub mod package;
 pub mod registry;
 pub mod sensor;
+pub mod storage;
+pub mod storage_codes;
 pub mod surfaceflinger;
 pub mod token;
 pub mod user;

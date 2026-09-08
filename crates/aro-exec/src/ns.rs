@@ -126,6 +126,17 @@ fn assemble_root(spec: &Spec, root: &Path) -> Result<()> {
     if let Some(v) = std::env::var_os("ARO_VENDOR_DIR") {
         bind(std::path::Path::new(&v), &root.join("vendor"), true)?;
     }
+    // External storage: a host directory becomes /sdcard (== /storage/emulated/0),
+    // so the app reads and writes the user's real files as itself, no root.
+    if let Some(sd) = std::env::var_os("ARO_SDCARD") {
+        let emulated = root.join("storage/emulated/0");
+        bind(std::path::Path::new(&sd), &emulated, false)?;
+        // /sdcard and /storage/self/primary point at it, as on a device.
+        let _ = std::fs::remove_dir(root.join("sdcard"));
+        std::os::unix::fs::symlink("/storage/emulated/0", root.join("sdcard")).ok();
+        std::fs::create_dir_all(root.join("storage/self")).ok();
+        std::os::unix::fs::symlink("/storage/emulated/0", root.join("storage/self/primary")).ok();
+    }
     // GSI keeps system_ext and product inside /system; expose them at / as the image does.
     for d in ["system_ext", "product"] {
         if l.system.join("system").join(d).is_dir() {
