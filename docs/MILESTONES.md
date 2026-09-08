@@ -54,7 +54,7 @@ written by `aro-props`; `linkerconfig` and `derive_classpath` run inside the
 namespace on first start; apex-info-list.xml and aconfig flag storage generated
 from the image; a stand-in `logd` socket so Android logs reach the terminal.
 
-| M3 | next: the app dies right after `onResume` when `Activity.makeVisible` adds its window (`IInputMethodManager`, `IWindowSession`, SurfaceFlinger). | |
+| M3 | done (2026-09-08): hello app renders its Activity in software into ARO gralloc buffers and the frame is shown in a real Hyprland window (window session + input channel, SurfaceFlinger AIDL/legacy composer, vsync, gralloc allocator + `mapper.aro.so`, Wayland presenter). | 729ac8b |
 
 ## M2 — Bus, Package and Activity services (subsystems 2, 3, 4)
 
