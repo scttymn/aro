@@ -91,9 +91,10 @@ fn main() -> Result<()> {
     *sf.client.lock().unwrap() = Some(composer_client.clone());
     let display_token = services::token::new_token("display");
     services::publish(&hub_impl, "SurfaceFlingerAIDL", services::surfaceflinger::ComposerAidl { sf: sf.clone(), client: composer_client, display_token });
-    let presenter = compositor::Presenter::spawn("ARO".to_string(), input_hub.clone());
+    let window_host = std::sync::Arc::new(services::window_session::WindowHost::new(sf.clone(), (1280, 800), 160, input_hub.clone()));
+    let presenter = compositor::Presenter::spawn("ARO".to_string(), input_hub.clone(), window_host.clone());
     services::publish(&hub_impl, "SurfaceFlinger", services::surfaceflinger::ComposerLegacy { sf: sf.clone(), transactions: std::sync::atomic::AtomicU32::new(0), gralloc: gralloc.clone(), presenter });
-    let window_session = services::binder_of(services::window_session::WindowSession { sf: sf.clone(), display: (1280, 800, 160), windows: std::sync::Mutex::new(Vec::new()), input: input_hub.clone() });
+    let window_session = services::binder_of(services::window_session::WindowSession { host: window_host.clone() });
     services::publish(&hub_impl, "window", services::window::WindowService { session: window_session });
     services::publish(&hub_impl, "input_method", services::input_method::InputMethodService);
     services::publish(&hub_impl, "input", services::input::InputService);

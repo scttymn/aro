@@ -1,4 +1,4 @@
-# ARO — Android Runtime for Omakase Linux
+# ARO — Android Runtime for Omarchy
 
 Run Android apps as native user-space processes on Omarchy, with deep integration
 into the Wayland display server and Hyprland, through a modular service bus that

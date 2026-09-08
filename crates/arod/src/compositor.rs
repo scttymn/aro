@@ -7,6 +7,7 @@
 //! copied into a shared-memory pool the compositor reads.
 use crate::input_channel::{InputHub, ACTION_DOWN, ACTION_MOVE, ACTION_UP};
 use crate::services::allocator::Buffer;
+use crate::services::window_session::WindowHost;
 use std::os::fd::{AsFd, AsRawFd, FromRawFd, OwnedFd};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
@@ -27,7 +28,7 @@ pub struct Presenter {
 impl Presenter {
     /// Start the Wayland thread. Returns None if there is no compositor
     /// (arod still runs headless; apps just won't be shown).
-    pub fn spawn(title: String, input: Arc<InputHub>) -> Option<Presenter> {
+    pub fn spawn(title: String, input: Arc<InputHub>, host: Arc<WindowHost>) -> Option<Presenter> {
         let conn = match Connection::connect_to_env() {
             Ok(c) => c,
             Err(e) => {
@@ -39,7 +40,7 @@ impl Presenter {
         std::thread::Builder::new()
             .name("aro-compositor".into())
             .spawn(move || {
-                if let Err(e) = run(conn, rx, title, input) {
+                if let Err(e) = run(conn, rx, title, input, host) {
                     log::error!("compositor: {e}");
                 }
             })
@@ -69,8 +70,9 @@ struct App {
     buffer_busy: bool,
     pending: Option<Arc<Buffer>>,
     last_size: (u32, u32),
-    // Input.
+    // Input + window host (frame size follows the toplevel's configure).
     input: Arc<InputHub>,
+    host: Arc<WindowHost>,
     seat: Option<wl_seat::WlSeat>,
     pointer: Option<wl_pointer::WlPointer>,
     ptr_x: f32,
@@ -79,7 +81,7 @@ struct App {
     over_surface: bool,
 }
 
-fn run(conn: Connection, rx: Receiver<Frame>, title: String, input: Arc<InputHub>) -> anyhow::Result<()> {
+fn run(conn: Connection, rx: Receiver<Frame>, title: String, input: Arc<InputHub>, host: Arc<WindowHost>) -> anyhow::Result<()> {
     let mut queue = conn.new_event_queue();
     let qh = queue.handle();
     let display = conn.display();
@@ -102,6 +104,7 @@ fn run(conn: Connection, rx: Receiver<Frame>, title: String, input: Arc<InputHub
         pending: None,
         last_size: (0, 0),
         input,
+        host,
         seat: None,
         pointer: None,
         ptr_x: 0.0,
@@ -347,8 +350,15 @@ impl Dispatch<xdg_surface::XdgSurface, ()> for App {
 
 impl Dispatch<xdg_toplevel::XdgToplevel, ()> for App {
     fn event(app: &mut Self, _: &xdg_toplevel::XdgToplevel, event: xdg_toplevel::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
-        if let xdg_toplevel::Event::Close = event {
-            app.closed = true;
+        match event {
+            xdg_toplevel::Event::Close => app.closed = true,
+            xdg_toplevel::Event::Configure { width, height, .. } => {
+                // 0x0 means "you choose"; otherwise the desktop tiled/resized us.
+                if width > 0 && height > 0 {
+                    app.host.resize(width, height);
+                }
+            }
+            _ => {}
         }
     }
 }
