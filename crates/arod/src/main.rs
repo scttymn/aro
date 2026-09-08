@@ -188,6 +188,7 @@ fn main() -> Result<()> {
     let vendor_dir = prepare_vendor_dir(&layout)?;
     services::publish(&hub_impl, "accessibility", services::accessibility::AccessibilityService);
     services::publish(&hub_impl, "user", services::user::UserService);
+    services::publish(&hub_impl, "uimode", services::uimode::UiModeService);
     services::publish(&hub_impl, "mount", services::storage::StorageService);
     services::publish(&hub_impl, "sensorservice", services::sensor::SensorService);
     services::publish(&hub_impl, "media.camera", services::camera::CameraService);

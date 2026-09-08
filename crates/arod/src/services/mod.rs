@@ -29,6 +29,7 @@ pub mod storage_codes;
 pub mod surfaceflinger;
 pub mod token;
 pub mod user;
+pub mod uimode;
 pub mod window;
 pub mod window_session;
 
