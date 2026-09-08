@@ -1,6 +1,9 @@
 package org.aro.hello;
 
 import android.app.Activity;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
 import android.content.Context;
 import android.graphics.Color;
 import android.os.Bundle;
@@ -51,6 +54,14 @@ public class MainActivity extends Activity {
                 Log.i(TAG, "click " + taps);
                 root.setBackgroundColor(colors[taps % colors.length]);
                 tv.setText("Tapped " + taps);
+                NotificationManager nm = getSystemService(NotificationManager.class);
+                nm.createNotificationChannel(new NotificationChannel("taps", "Taps", NotificationManager.IMPORTANCE_DEFAULT));
+                Notification n = new Notification.Builder(MainActivity.this, "taps")
+                        .setSmallIcon(android.R.drawable.ic_dialog_info)
+                        .setContentTitle("Hello from ARO")
+                        .setContentText("Tapped " + taps + " time" + (taps == 1 ? "" : "s"))
+                        .build();
+                nm.notify(1, n);
             }
         });
         setContentView(root);

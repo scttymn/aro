@@ -15,5 +15,6 @@ log.workspace = true
 env_logger.workspace = true
 wayland-client.workspace = true
 wayland-protocols.workspace = true
+zbus.workspace = true
 aro-exec = { path = "../aro-exec" }
 aro-apk = { path = "../aro-apk" }
