@@ -13,5 +13,7 @@ libc.workspace = true
 rsbinder.workspace = true
 log.workspace = true
 env_logger.workspace = true
+wayland-client.workspace = true
+wayland-protocols.workspace = true
 aro-exec = { path = "../aro-exec" }
 aro-apk = { path = "../aro-apk" }

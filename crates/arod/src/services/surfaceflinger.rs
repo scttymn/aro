@@ -132,6 +132,33 @@ pub static ISURFACECOMPOSER_LEGACY: &[(u32, &str)] = &[(8, "setTransactionState"
 pub struct ComposerLegacy {
     pub sf: Arc<SurfaceFlinger>,
     pub transactions: AtomicU32,
+    pub gralloc: Arc<crate::services::allocator::Gralloc>,
+    pub presenter: Option<crate::compositor::Presenter>,
+}
+
+/// Scan a transaction parcel for our gralloc handle: the "AROB" magic int
+/// followed by w,h,stride,format,layers,usage(2),size,id(2). Returns
+/// (buffer_id, width, height) of the last match (the freshest buffer).
+fn scan_for_aro_buffer(data: &mut Parcel) -> Option<(u64, u32, u32)> {
+    let save = data.data_position();
+    let size = data.data_size();
+    data.set_data_position(0);
+    let bytes = data.aro_debug_bytes().0;
+    data.set_data_position(save);
+    let _ = size;
+    let magic = super::allocator::HANDLE_MAGIC.to_le_bytes();
+    let mut found = None;
+    let mut i = 0usize;
+    while i + 44 <= bytes.len() {
+        if bytes[i..i + 4] == magic {
+            let rd = |o: usize| u32::from_le_bytes([bytes[i + o], bytes[i + o + 1], bytes[i + o + 2], bytes[i + o + 3]]);
+            let (w, h) = (rd(4), rd(8));
+            let id = rd(36) as u64 | ((rd(40) as u64) << 32);
+            found = Some((id, w, h));
+        }
+        i += 4;
+    }
+    found
 }
 
 impl Service for ComposerLegacy {
@@ -142,7 +169,17 @@ impl Service for ComposerLegacy {
         match name {
             "setTransactionState" => {
                 let n = self.transactions.fetch_add(1, Ordering::SeqCst) + 1;
-                log::info!("sf: setTransactionState #{n} ({} bytes)", data.data_size());
+                // The posted buffer is a flattened GraphicBuffer; its ARO native handle
+                // carries "AROB" magic + our buffer id, which we scan for rather than
+                // parsing the whole layer_state_t.
+                if let Some((id, w, h)) = scan_for_aro_buffer(data) {
+                    log::info!("sf: setTransactionState #{n} posts ARO buffer {id} ({w}x{h})");
+                    if let (Some(p), Some(buf)) = (&self.presenter, self.gralloc.buffers.lock().unwrap().get(&id).cloned()) {
+                        p.present(buf);
+                    }
+                } else {
+                    log::debug!("sf: setTransactionState #{n} ({} bytes, no buffer)", data.data_size());
+                }
                 reply.write_i32(0)?; // status_t OK
                 Ok(true)
             }

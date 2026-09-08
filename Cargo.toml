@@ -10,6 +10,8 @@ repository = "https://github.com/scttymn/aro"
 
 [workspace.dependencies]
 anyhow = "1"
+wayland-client = "0.31"
+wayland-protocols = { version = "0.31", features = ["client"] }
 clap = { version = "4", features = ["derive"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 nix = { version = "0.29", features = ["sched", "mount", "fs", "process", "signal", "user", "socket", "hostname", "poll"] }

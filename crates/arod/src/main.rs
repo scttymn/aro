@@ -11,6 +11,7 @@ mod session;
 mod shm;
 
 use anyhow::{bail, Context, Result};
+mod compositor;
 use aro_exec::{layout::Layout, logd, ns::Session, prepare};
 use clap::{Parser, Subcommand};
 use rsbinder::hub::android_16::android::os::IServiceManager::BnServiceManager;
@@ -79,20 +80,23 @@ fn main() -> Result<()> {
     let controller = services::binder_of(services::activity_task::ActivityClientController);
     *activity.client_controller.lock().unwrap() = Some(controller.clone());
     services::publish(&hub_impl, "activity_task", services::activity_task::ActivityTaskService { client_controller: std::sync::Mutex::new(Some(controller)) });
+    // Gralloc (allocator + mapper) — created early so the composer can resolve
+    // posted buffers to their memfds for the Wayland presenter.
+    let gralloc = std::sync::Arc::new(services::allocator::Gralloc::default());
     // Composer + window manager.
     let sf = std::sync::Arc::new(services::surfaceflinger::SurfaceFlinger::new(1280, 800));
     let composer_client = services::binder_of(services::surfaceflinger::ComposerClient { sf: sf.clone() });
     *sf.client.lock().unwrap() = Some(composer_client.clone());
     let display_token = services::token::new_token("display");
     services::publish(&hub_impl, "SurfaceFlingerAIDL", services::surfaceflinger::ComposerAidl { sf: sf.clone(), client: composer_client, display_token });
-    services::publish(&hub_impl, "SurfaceFlinger", services::surfaceflinger::ComposerLegacy { sf: sf.clone(), transactions: std::sync::atomic::AtomicU32::new(0) });
+    let presenter = compositor::Presenter::spawn("ARO".to_string());
+    services::publish(&hub_impl, "SurfaceFlinger", services::surfaceflinger::ComposerLegacy { sf: sf.clone(), transactions: std::sync::atomic::AtomicU32::new(0), gralloc: gralloc.clone(), presenter });
     let window_session = services::binder_of(services::window_session::WindowSession { sf: sf.clone(), display: (1280, 800, 160), windows: std::sync::Mutex::new(Vec::new()) });
     services::publish(&hub_impl, "window", services::window::WindowService { session: window_session });
     services::publish(&hub_impl, "input_method", services::input_method::InputMethodService);
     services::publish(&hub_impl, "input", services::input::InputService);
-    // Gralloc: the allocator is a VINTF-stable HAL binder; the mapper half is a
-    // bionic library bound into the app at /vendor/lib64/hw/mapper.aro.so.
-    let gralloc = std::sync::Arc::new(services::allocator::Gralloc::default());
+    // The allocator is a VINTF-stable HAL binder; the mapper half is a bionic
+    // library bound into the app at /vendor/lib64/hw/mapper.aro.so.
     hub_impl.register("android.hardware.graphics.allocator.IAllocator/default", services::vintf_binder_of(services::allocator::AllocatorService { gralloc: gralloc.clone() }));
     let vendor_dir = prepare_vendor_dir(&layout)?;
     services::publish(&hub_impl, "accessibility", services::accessibility::AccessibilityService);
