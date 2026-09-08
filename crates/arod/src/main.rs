@@ -75,8 +75,28 @@ fn main() -> Result<()> {
     ProcessState::start_thread_pool();
     log::info!("arod: bus up on {}", binder_path.display());
 
+    // 3a. The host: which display, at what scale and refresh, and which app we
+    // are about to show. Everything below sizes itself from these; nothing is
+    // assumed about the desktop.
+    let host = compositor::connect();
+    let manifest = match &cli.cmd {
+        Cmd::App { apk, .. } => Some(aro_apk::inspect(&apk.canonicalize()?)?),
+        _ => None,
+    };
+    let (hd, host_conn) = match host {
+        Some(h) => (h.display.clone(), Some(h)),
+        None => {
+            if manifest.is_some() {
+                bail!("no Wayland display (WAYLAND_DISPLAY unset or no compositor); an app needs one to be shown");
+            }
+            // Headless (run/shell only): a placeholder so services can be published; no window exists.
+            (compositor::HostDisplay { name: "headless".into(), width: 0, height: 0, scale: 1, refresh_mhz: 0 }, None)
+        }
+    };
+    let display = hd.tuple();
+
     // 3b. Services.
-    let registry = std::sync::Arc::new(services::registry::Registry { apps: std::sync::Mutex::new(Vec::new()), display: (1280, 800, 160) });
+    let registry = std::sync::Arc::new(services::registry::Registry { apps: std::sync::Mutex::new(Vec::new()), display });
     let activity = std::sync::Arc::new(services::activity::ActivityService { registry: registry.clone(), pending: std::sync::Mutex::new(None), attached: std::sync::Mutex::new(None), client_controller: std::sync::Mutex::new(None) });
     let controller = services::binder_of(services::activity_task::ActivityClientController);
     *activity.client_controller.lock().unwrap() = Some(controller.clone());
@@ -86,13 +106,17 @@ fn main() -> Result<()> {
     let gralloc = std::sync::Arc::new(services::allocator::Gralloc::default());
     let input_hub = std::sync::Arc::new(input_channel::InputHub::default());
     // Composer + window manager.
-    let sf = std::sync::Arc::new(services::surfaceflinger::SurfaceFlinger::new(1280, 800));
+    let sf = std::sync::Arc::new(services::surfaceflinger::SurfaceFlinger::new(hd.width as u32, hd.height as u32, hd.frame_interval_ns()));
     let composer_client = services::binder_of(services::surfaceflinger::ComposerClient { sf: sf.clone() });
     *sf.client.lock().unwrap() = Some(composer_client.clone());
     let display_token = services::token::new_token("display");
     services::publish(&hub_impl, "SurfaceFlingerAIDL", services::surfaceflinger::ComposerAidl { sf: sf.clone(), client: composer_client, display_token });
-    let window_host = std::sync::Arc::new(services::window_session::WindowHost::new(sf.clone(), (1280, 800), 160, input_hub.clone()));
-    let presenter = compositor::Presenter::spawn("ARO".to_string(), input_hub.clone(), window_host.clone());
+    let window_host = std::sync::Arc::new(services::window_session::WindowHost::new(sf.clone(), (hd.width, hd.height), hd.dpi(), hd.scale, input_hub.clone()));
+    // Window identity is the app's: package as app_id (desktop matches it to a
+    // .desktop entry); the title is the package until the manifest label is
+    // resolved from resources.arsc.
+    let package = manifest.as_ref().map(|m| m.package.clone()).unwrap_or_else(|| "aro".to_string());
+    let presenter = host_conn.and_then(|h| compositor::Presenter::spawn(h, package.clone(), package.clone(), input_hub.clone(), window_host.clone()));
     services::publish(&hub_impl, "SurfaceFlinger", services::surfaceflinger::ComposerLegacy { sf: sf.clone(), transactions: std::sync::atomic::AtomicU32::new(0), gralloc: gralloc.clone(), presenter });
     let window_session = services::binder_of(services::window_session::WindowSession { host: window_host.clone() });
     services::publish(&hub_impl, "window", services::window::WindowService { session: window_session });
@@ -109,7 +133,7 @@ fn main() -> Result<()> {
     services::publish(&hub_impl, "media.camera", services::camera::CameraService);
     services::publish(&hub_impl, "package", services::package::PackageService { registry: registry.clone() });
     services::publish(&hub_impl, "platform_compat", services::compat::PlatformCompatService::load(&layout.system, registry.clone()));
-    services::publish(&hub_impl, "display", services::display::DisplayService { width: 1280, height: 800, dpi: 160, callbacks: std::sync::Mutex::new(Vec::new()) });
+    services::publish(&hub_impl, "display", services::display::DisplayService { name: hd.name.clone(), width: hd.width, height: hd.height, dpi: hd.dpi(), callbacks: std::sync::Mutex::new(Vec::new()) });
     services::publish(&hub_impl, "activity", services::activity::ActivityRef(activity.clone()));
 
     // Properties are cheap to regenerate and ARO's extra ones evolve with the runtime.
@@ -136,7 +160,7 @@ fn main() -> Result<()> {
         Cmd::App { apk, activity: main_activity } => {
             let apk = apk.canonicalize()?;
             let name = apk.file_name().unwrap().to_string_lossy().into_owned();
-            let manifest = aro_apk::inspect(&apk)?;
+            let manifest = manifest.expect("manifest parsed above");
             let package = manifest.package.clone();
             log::info!("arod: {} v{} target sdk {} app {:?} launcher {:?}", package, manifest.version_code, manifest.target_sdk, manifest.app_class, manifest.main_activity().map(|a| &a.name));
             for d in ["data", "user_de/0"] {

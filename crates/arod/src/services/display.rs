@@ -9,6 +9,7 @@ use rsbinder::{Parcel, Result, SIBinder, TransactionCode};
 use std::sync::Mutex;
 
 pub struct DisplayService {
+    pub name: String,
     pub width: i32,
     pub height: i32,
     pub dpi: i32,
@@ -47,7 +48,7 @@ impl DisplayService {
         p.write_i32(0)?; // displayGroupId
         ap::string16(p, None)?; // address: writeParcelable(null)
         ap::string16(p, None)?; // deviceProductInfo: writeParcelable(null)
-        ap::string8(p, Some("ARO display"))?; // name
+        ap::string8(p, Some(&self.name))?; // name (the host output)
         p.write_i32(w)?; // appWidth
         p.write_i32(h)?; // appHeight
         p.write_i32(w.min(h))?; // smallestNominalAppWidth

@@ -31,11 +31,13 @@ pub struct SurfaceFlinger {
     pub height: u32,
     /// The ISurfaceComposerClient binder handed to apps (set at publish time).
     pub client: Mutex<Option<SIBinder>>,
+    /// Vsync period, from the host output's refresh rate.
+    pub frame_interval_ns: i64,
 }
 
 impl SurfaceFlinger {
-    pub fn new(width: u32, height: u32) -> Self {
-        SurfaceFlinger { layers: Mutex::new(Vec::new()), next_layer_id: AtomicI32::new(1), width, height, client: Mutex::new(None) }
+    pub fn new(width: u32, height: u32, frame_interval_ns: i64) -> Self {
+        SurfaceFlinger { layers: Mutex::new(Vec::new()), next_layer_id: AtomicI32::new(1), width, height, client: Mutex::new(None), frame_interval_ns }
     }
 
     pub fn create_layer(&self, name: &str, width: u32, height: u32) -> Arc<Layer> {
@@ -96,7 +98,7 @@ impl Service for ComposerAidl {
                 let registration = data.read_i32()?;
                 let _layer: Option<SIBinder> = data.read().unwrap_or(None);
                 log::info!("sf: createDisplayEventConnection source={vsync_source} registration={registration:#x}");
-                let conn = DisplayEventConnection::new()?;
+                let conn = DisplayEventConnection::new(self.sf.frame_interval_ns)?;
                 let binder = super::binder_of(conn);
                 ap::no_exception(reply)?;
                 reply.write(&Some(binder))?;
@@ -251,10 +253,10 @@ pub struct DisplayEventConnection {
     /// >0: continuous vsync at that divisor; 0: only on request.
     rate: Arc<AtomicI32>,
     counter: Arc<AtomicU32>,
+    interval_ns: i64,
 }
 
 const DISPLAY_EVENT_VSYNC: u32 = 0x7673_796e; // fourcc('v','s','y','n')
-const FRAME_INTERVAL_NS: i64 = 16_666_667;
 const EVENT_SIZE: usize = 224; // sizeof(DisplayEventReceiver::Event) on x86_64
 
 fn now_ns() -> i64 {
@@ -264,18 +266,18 @@ fn now_ns() -> i64 {
 }
 
 impl DisplayEventConnection {
-    fn new() -> Result<Self> {
+    fn new(interval_ns: i64) -> Result<Self> {
         let mut fds = [0i32; 2];
         if unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_SEQPACKET | libc::SOCK_CLOEXEC | libc::SOCK_NONBLOCK, 0, fds.as_mut_ptr()) } != 0 {
             return Err(rsbinder::StatusCode::Unknown);
         }
         use std::os::fd::FromRawFd;
         let (receive, send) = unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) };
-        Ok(DisplayEventConnection { receive, send: Arc::new(send), rate: Arc::new(AtomicI32::new(0)), counter: Arc::new(AtomicU32::new(0)) })
+        Ok(DisplayEventConnection { receive, send: Arc::new(send), rate: Arc::new(AtomicI32::new(0)), counter: Arc::new(AtomicU32::new(0)), interval_ns })
     }
 
     /// One DisplayEventReceiver::Event of type VSYNC.
-    fn write_vsync(send: &OwnedFd, count: u32) {
+    fn write_vsync(send: &OwnedFd, count: u32, interval: i64) {
         let now = now_ns();
         let mut e = Vec::with_capacity(EVENT_SIZE);
         let push = |v: &mut Vec<u8>, b: &[u8]| v.extend_from_slice(b);
@@ -286,14 +288,14 @@ impl DisplayEventConnection {
         // VSync
         push(&mut e, &count.to_le_bytes());
         push(&mut e, &[0u8; 4]); // pad: VsyncEventData is 8-aligned
-        push(&mut e, &FRAME_INTERVAL_NS.to_le_bytes()); // frameInterval
+        push(&mut e, &interval.to_le_bytes()); // frameInterval
         push(&mut e, &0u32.to_le_bytes()); // preferredFrameTimelineIndex
         push(&mut e, &1u32.to_le_bytes()); // frameTimelinesLength
         push(&mut e, &0u32.to_le_bytes()); // numberQueuedBuffers
         push(&mut e, &[0u8; 4]); // pad
         let vsync_id = count as i64;
-        let deadline = now + FRAME_INTERVAL_NS - 2_000_000;
-        let present = now + 2 * FRAME_INTERVAL_NS;
+        let deadline = now + interval - 2_000_000;
+        let present = now + 2 * interval;
         push(&mut e, &vsync_id.to_le_bytes());
         push(&mut e, &deadline.to_le_bytes());
         push(&mut e, &present.to_le_bytes());
@@ -307,12 +309,13 @@ impl DisplayEventConnection {
     fn write_vsync_event_data(&self, p: &mut Parcel) -> Result<()> {
         let now = now_ns();
         let count = self.counter.load(Ordering::SeqCst);
-        p.write_i64(FRAME_INTERVAL_NS)?;
+        let interval = self.interval_ns;
+        p.write_i64(interval)?;
         p.write_u32(0)?; // preferredFrameTimelineIndex
         p.write_u32(1)?; // frameTimelinesLength
         p.write_i64(count as i64)?; // vsyncId
-        p.write_i64(now + FRAME_INTERVAL_NS - 2_000_000)?; // deadline
-        p.write_i64(now + 2 * FRAME_INTERVAL_NS) // expectedPresentationTime
+        p.write_i64(now + interval - 2_000_000)?; // deadline
+        p.write_i64(now + 2 * interval) // expectedPresentationTime
     }
 }
 
@@ -335,12 +338,12 @@ impl Service for DisplayEventConnection {
                 log::info!("sf: setVsyncRate {rate}");
                 if rate > 0 {
                     // Continuous vsync until the rate is set back to 0.
-                    let (send, rate_flag, counter) = (self.send.clone(), self.rate.clone(), self.counter.clone());
+                    let (send, rate_flag, counter, interval) = (self.send.clone(), self.rate.clone(), self.counter.clone(), self.interval_ns);
                     std::thread::spawn(move || {
                         while rate_flag.load(Ordering::SeqCst) > 0 {
-                            std::thread::sleep(std::time::Duration::from_nanos(FRAME_INTERVAL_NS as u64));
+                            std::thread::sleep(std::time::Duration::from_nanos(interval as u64));
                             let c = counter.fetch_add(1, Ordering::SeqCst) + 1;
-                            Self::write_vsync(&send, c);
+                            Self::write_vsync(&send, c, interval);
                         }
                     });
                 }
@@ -348,11 +351,11 @@ impl Service for DisplayEventConnection {
                 Ok(true)
             }
             "requestNextVsync" => {
-                let (send, counter) = (self.send.clone(), self.counter.clone());
+                let (send, counter, interval) = (self.send.clone(), self.counter.clone(), self.interval_ns);
                 std::thread::spawn(move || {
-                    std::thread::sleep(std::time::Duration::from_millis(8));
+                    std::thread::sleep(std::time::Duration::from_nanos((interval / 2) as u64));
                     let c = counter.fetch_add(1, Ordering::SeqCst) + 1;
-                    Self::write_vsync(&send, c);
+                    Self::write_vsync(&send, c, interval);
                 });
                 Ok(true)
             }

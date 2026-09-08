@@ -25,6 +25,9 @@ pub struct AppWindow {
 pub struct WindowHost {
     pub sf: Arc<SurfaceFlinger>,
     pub dpi: i32,
+    /// Host output scale: compositor sizes are logical pixels, the app
+    /// renders physical ones (logical * scale).
+    pub scale: i32,
     pub size: Mutex<(i32, i32)>,
     pub windows: Mutex<Vec<AppWindow>>,
     pub input: Arc<crate::input_channel::InputHub>,
@@ -37,8 +40,8 @@ pub struct WindowSession {
 const IWINDOW_RESIZED: u32 = 2;
 
 impl WindowHost {
-    pub fn new(sf: Arc<SurfaceFlinger>, size: (i32, i32), dpi: i32, input: Arc<crate::input_channel::InputHub>) -> Self {
-        WindowHost { sf, dpi, size: Mutex::new(size), windows: Mutex::new(Vec::new()), input }
+    pub fn new(sf: Arc<SurfaceFlinger>, size: (i32, i32), dpi: i32, scale: i32, input: Arc<crate::input_channel::InputHub>) -> Self {
+        WindowHost { sf, dpi, scale: scale.max(1), size: Mutex::new(size), windows: Mutex::new(Vec::new()), input }
     }
 
     pub fn frame(&self) -> Rect {
@@ -46,9 +49,10 @@ impl WindowHost {
         Rect { left: 0, top: 0, right: w, bottom: h }
     }
 
-    /// The desktop resized our toplevel: adopt the size and tell every app
-    /// window to relayout at it (IWindow.resized, oneway).
+    /// The desktop resized our toplevel (logical pixels): adopt the physical
+    /// size and tell every app window to relayout at it (IWindow.resized, oneway).
     pub fn resize(&self, w: i32, h: i32) {
+        let (w, h) = (w * self.scale, h * self.scale);
         {
             let mut s = self.size.lock().unwrap();
             if *s == (w, h) {

@@ -11,7 +11,7 @@ use crate::services::window_session::WindowHost;
 use std::os::fd::{AsFd, AsRawFd, FromRawFd, OwnedFd};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
-use wayland_client::protocol::{wl_buffer, wl_compositor, wl_pointer, wl_registry, wl_seat, wl_shm, wl_shm_pool, wl_surface};
+use wayland_client::protocol::{wl_buffer, wl_compositor, wl_output, wl_pointer, wl_registry, wl_seat, wl_shm, wl_shm_pool, wl_surface};
 use wayland_client::{Connection, Dispatch, QueueHandle};
 use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
 
@@ -20,27 +20,133 @@ pub struct Frame {
     pub buffer: Arc<Buffer>,
 }
 
+/// What the host says about the display the app will be shown on. Nothing in
+/// here is chosen by ARO: size and refresh come from the output's current
+/// mode, the scale is the user's compositor setting, and Android density is
+/// defined as 160 dp per logical pixel so dp == the desktop's logical pixel.
+#[derive(Clone, Debug)]
+pub struct HostDisplay {
+    pub name: String,
+    pub width: i32,
+    pub height: i32,
+    pub scale: i32,
+    pub refresh_mhz: i32,
+}
+
+impl HostDisplay {
+    pub fn dpi(&self) -> i32 {
+        160 * self.scale.max(1)
+    }
+    pub fn frame_interval_ns(&self) -> i64 {
+        if self.refresh_mhz > 0 {
+            1_000_000_000_000 / self.refresh_mhz as i64
+        } else {
+            16_666_667 // output advertised no refresh; 60 Hz until it does
+        }
+    }
+    pub fn tuple(&self) -> (i32, i32, i32) {
+        (self.width, self.height, self.dpi())
+    }
+}
+
+/// A connected Wayland session plus the display we discovered on it.
+pub struct Host {
+    conn: Connection,
+    pub display: HostDisplay,
+}
+
+#[derive(Default)]
+struct OutputInfo {
+    name: String,
+    width: i32,
+    height: i32,
+    scale: i32,
+    refresh_mhz: i32,
+    done: bool,
+}
+
+#[derive(Default)]
+struct Discover {
+    outputs: Vec<(wl_output::WlOutput, OutputInfo)>,
+}
+
+impl Dispatch<wl_registry::WlRegistry, ()> for Discover {
+    fn event(d: &mut Self, registry: &wl_registry::WlRegistry, event: wl_registry::Event, _: &(), _: &Connection, qh: &QueueHandle<Self>) {
+        if let wl_registry::Event::Global { name, interface, version } = event {
+            if interface == "wl_output" {
+                let out = registry.bind::<wl_output::WlOutput, _, _>(name, version.min(4), qh, ());
+                d.outputs.push((out, OutputInfo { scale: 1, ..Default::default() }));
+            }
+        }
+    }
+}
+
+impl Dispatch<wl_output::WlOutput, ()> for Discover {
+    fn event(d: &mut Self, output: &wl_output::WlOutput, event: wl_output::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+        let Some((_, info)) = d.outputs.iter_mut().find(|(o, _)| o == output) else { return };
+        match event {
+            wl_output::Event::Mode { flags, width, height, refresh } => {
+                let current = matches!(flags, wayland_client::WEnum::Value(f) if f.contains(wl_output::Mode::Current));
+                if current || info.width == 0 {
+                    info.width = width;
+                    info.height = height;
+                    info.refresh_mhz = refresh;
+                }
+            }
+            wl_output::Event::Scale { factor } => info.scale = factor,
+            wl_output::Event::Name { name } => info.name = name,
+            wl_output::Event::Done => info.done = true,
+            _ => {}
+        }
+    }
+}
+
+/// Connect to the session's compositor and read the display it offers.
+/// Returns None when there is no Wayland display at all.
+pub fn connect() -> Option<Host> {
+    let conn = match Connection::connect_to_env() {
+        Ok(c) => c,
+        Err(e) => {
+            log::warn!("compositor: no Wayland display ({e})");
+            return None;
+        }
+    };
+    let mut queue = conn.new_event_queue();
+    let qh = queue.handle();
+    let mut d = Discover::default();
+    conn.display().get_registry(&qh, ());
+    // One roundtrip binds the outputs, the next delivers their geometry/mode/done.
+    for _ in 0..2 {
+        if let Err(e) = queue.roundtrip(&mut d) {
+            log::warn!("compositor: output discovery failed: {e}");
+            return None;
+        }
+    }
+    let Some((_, info)) = d.outputs.iter().find(|(_, i)| i.width > 0) else {
+        log::warn!("compositor: no wl_output with a mode; cannot size a display");
+        return None;
+    };
+    let display = HostDisplay { name: info.name.clone(), width: info.width, height: info.height, scale: info.scale, refresh_mhz: info.refresh_mhz };
+    log::info!("compositor: display {:?} {}x{} scale {} refresh {} mHz -> dpi {}", display.name, display.width, display.height, display.scale, display.refresh_mhz, display.dpi());
+    Some(Host { conn, display })
+}
+
 #[derive(Clone)]
 pub struct Presenter {
     tx: Sender<Frame>,
 }
 
 impl Presenter {
-    /// Start the Wayland thread. Returns None if there is no compositor
-    /// (arod still runs headless; apps just won't be shown).
-    pub fn spawn(title: String, input: Arc<InputHub>, host: Arc<WindowHost>) -> Option<Presenter> {
-        let conn = match Connection::connect_to_env() {
-            Ok(c) => c,
-            Err(e) => {
-                log::warn!("compositor: no Wayland display ({e}); running headless");
-                return None;
-            }
-        };
+    /// Start the Wayland thread on an already-connected host. `app_id` is the
+    /// app's package (so the desktop can match it to a .desktop entry) and
+    /// `title` is what the window shows.
+    pub fn spawn(host_conn: Host, app_id: String, title: String, input: Arc<InputHub>, host: Arc<WindowHost>) -> Option<Presenter> {
+        let conn = host_conn.conn;
         let (tx, rx) = std::sync::mpsc::channel::<Frame>();
         std::thread::Builder::new()
             .name("aro-compositor".into())
             .spawn(move || {
-                if let Err(e) = run(conn, rx, title, input, host) {
+                if let Err(e) = run(conn, rx, app_id, title, input, host) {
                     log::error!("compositor: {e}");
                 }
             })
@@ -81,7 +187,7 @@ struct App {
     over_surface: bool,
 }
 
-fn run(conn: Connection, rx: Receiver<Frame>, title: String, input: Arc<InputHub>, host: Arc<WindowHost>) -> anyhow::Result<()> {
+fn run(conn: Connection, rx: Receiver<Frame>, app_id: String, title: String, input: Arc<InputHub>, host: Arc<WindowHost>) -> anyhow::Result<()> {
     let mut queue = conn.new_event_queue();
     let qh = queue.handle();
     let display = conn.display();
@@ -127,7 +233,8 @@ fn run(conn: Connection, rx: Receiver<Frame>, title: String, input: Arc<InputHub
     let xdg_surface = wm_base.get_xdg_surface(&surface, &qh, ());
     let toplevel = xdg_surface.get_toplevel(&qh, ());
     toplevel.set_title(app.title.clone());
-    toplevel.set_app_id("aro".into());
+    toplevel.set_app_id(app_id);
+    surface.set_buffer_scale(app.host.scale);
     surface.commit();
     app.surface = Some(surface);
     app.xdg_surface = Some(xdg_surface);
@@ -391,15 +498,15 @@ impl Dispatch<wl_pointer::WlPointer, ()> for App {
         match event {
             Event::Enter { surface_x, surface_y, .. } => {
                 app.over_surface = true;
-                app.ptr_x = surface_x as f32;
-                app.ptr_y = surface_y as f32;
+                app.ptr_x = surface_x as f32 * app.host.scale as f32;
+                app.ptr_y = surface_y as f32 * app.host.scale as f32;
             }
             Event::Leave { .. } => {
                 app.over_surface = false;
             }
             Event::Motion { surface_x, surface_y, .. } => {
-                app.ptr_x = surface_x as f32;
-                app.ptr_y = surface_y as f32;
+                app.ptr_x = surface_x as f32 * app.host.scale as f32;
+                app.ptr_y = surface_y as f32 * app.host.scale as f32;
                 if app.ptr_down {
                     app.input.send_motion(ACTION_MOVE, app.ptr_x, app.ptr_y);
                 }
