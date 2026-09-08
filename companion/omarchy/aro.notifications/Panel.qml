@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Layouts
 import Quickshell
 import Quickshell.Io
 import qs.Commons
@@ -23,6 +24,8 @@ Panel {
 
   readonly property int count: notes.count
   readonly property color fg: bar ? bar.foreground : Color.foreground
+  readonly property color urgent: bar ? bar.urgent : Color.urgent
+  readonly property color dim: Qt.darker(fg, 1.5)
 
   readonly property string socketPath: (Quickshell.env("XDG_RUNTIME_DIR") || "/run/user/1000") + "/aro/notifications.sock"
 
@@ -181,97 +184,131 @@ Panel {
             Repeater {
               model: notes
 
-              Rectangle {
+              // Full-width row (like the HEY pane): the whole row opens the
+              // app; the red circle-✕ on the right dismisses. No inset card box.
+              CursorSurface {
+                id: row
                 required property int index
                 required property var model
                 width: cards.width
-                implicitHeight: cardCol.implicitHeight + Style.space(20)
-                radius: Math.max(6, Style.space(10))
-                color: Color.notifications.background
-                border.width: model.ongoing ? Math.max(1, Style.space(1)) : 0
-                border.color: Color.notifications.border
+                foreground: root.fg
+                implicitHeight: rowContent.implicitHeight + Style.space(16)
 
                 MouseArea {
                   anchors.fill: parent
+                  hoverEnabled: true
                   cursorShape: Qt.PointingHandCursor
-                  acceptedButtons: Qt.LeftButton
-                  onClicked: root.invoke(model.nid)
+                  onClicked: root.invoke(row.model.nid)
                 }
 
-                Column {
-                  id: cardCol
+                RowLayout {
+                  id: rowContent
                   anchors.left: parent.left
                   anchors.right: parent.right
-                  anchors.top: parent.top
-                  anchors.leftMargin: Style.space(14)
-                  anchors.rightMargin: Style.space(14)
-                  anchors.topMargin: Style.space(10)
-                  spacing: Style.space(2)
+                  anchors.verticalCenter: parent.verticalCenter
+                  anchors.leftMargin: Style.space(10)
+                  anchors.rightMargin: Style.space(10)
+                  spacing: Style.space(9)
 
-                  Row {
-                    width: parent.width
-                    spacing: Style.space(6)
+                  // App avatar: first letter of the package/app label.
+                  Rectangle {
+                    Layout.preferredWidth: Style.space(24)
+                    Layout.preferredHeight: Style.space(24)
+                    Layout.alignment: Qt.AlignTop
+                    radius: width / 2
+                    color: Color.accent
 
                     Text {
-                      text: model.appName
-                      color: Color.muted
+                      anchors.centerIn: parent
+                      text: (String(row.model.appName || "?").replace(/^.*\./, "").charAt(0) || "?").toUpperCase()
+                      textFormat: Text.PlainText
+                      color: Color.popups.background
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                      font.bold: true
+                    }
+                  }
+
+                  ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: Style.space(2)
+
+                    Text {
+                      Layout.fillWidth: true
+                      visible: text !== ""
+                      text: row.model.title
+                      textFormat: Text.PlainText
+                      color: root.fg
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.body
+                      font.weight: Font.DemiBold
+                      elide: Text.ElideRight
+                    }
+
+                    Text {
+                      Layout.fillWidth: true
+                      visible: text !== ""
+                      text: row.model.body
+                      textFormat: Text.PlainText
+                      color: root.dim
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.bodySmall
+                      wrapMode: Text.Wrap
+                      maximumLineCount: 2
+                      elide: Text.ElideRight
+                    }
+
+                    Text {
+                      Layout.fillWidth: true
+                      text: String(row.model.appName || "").replace(/^.*\./, "")
+                      textFormat: Text.PlainText
+                      color: Color.accent
                       font.family: Style.font.family
                       font.pixelSize: Style.font.caption
                       font.capitalization: Font.AllUppercase
                       elide: Text.ElideRight
-                      width: parent.width - ongoingTag.width - dismissX.width - Style.space(12)
                     }
+                  }
+
+                  // Ongoing notifications can't be dismissed — a pinned marker
+                  // stands in for the dismiss circle.
+                  Text {
+                    visible: row.model.ongoing
+                    Layout.alignment: Qt.AlignVCenter
+                    text: "ongoing"
+                    color: Color.notifications.countdown
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.caption
+                  }
+
+                  // Dismiss: a red circle with an ✕ — same dimensions as HEY's
+                  // unread badge (space(16) tall, radius space(8), top-aligned).
+                  Rectangle {
+                    visible: !row.model.ongoing
+                    Layout.alignment: Qt.AlignTop
+                    Layout.topMargin: Style.space(2)
+                    Layout.preferredWidth: Style.space(16)
+                    Layout.preferredHeight: Style.space(16)
+                    radius: Style.space(8)
+                    color: root.urgent
 
                     Text {
-                      id: ongoingTag
-                      visible: model.ongoing
-                      text: "ongoing"
-                      color: Color.notifications.countdown
+                      anchors.centerIn: parent
+                      text: "✕"
+                      textFormat: Text.PlainText
+                      color: Color.background
                       font.family: Style.font.family
                       font.pixelSize: Style.font.caption
+                      font.bold: true
                     }
 
-                    // × dismiss (ongoing notifications can't be swiped away).
-                    Text {
-                      id: dismissX
-                      visible: !model.ongoing
-                      text: "✕"
-                      color: xMouse.containsMouse ? Color.accent : Color.muted
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.subtitle
-
-                      MouseArea {
-                        id: xMouse
-                        anchors.fill: parent
-                        anchors.margins: -Style.space(6)
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root.dismiss(model.nid)
-                      }
+                    MouseArea {
+                      id: dismissMouse
+                      anchors.fill: parent
+                      hoverEnabled: true
+                      cursorShape: Qt.PointingHandCursor
+                      onClicked: root.dismiss(row.model.nid)
                     }
-                  }
-
-                  Text {
-                    width: parent.width
-                    text: model.title
-                    visible: text !== ""
-                    color: root.fg
-                    font.family: Style.font.family
-                    font.pixelSize: Style.font.subtitle
-                    font.bold: true
-                    elide: Text.ElideRight
-                  }
-
-                  Text {
-                    width: parent.width
-                    text: model.body
-                    visible: text !== ""
-                    color: Color.notifications.text
-                    font.family: Style.font.family
-                    font.pixelSize: Style.font.body
-                    wrapMode: Text.WordWrap
-                    maximumLineCount: 4
-                    elide: Text.ElideRight
                   }
                 }
               }
