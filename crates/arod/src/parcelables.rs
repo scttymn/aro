@@ -121,7 +121,8 @@ impl Default for ApplicationInfo {
             process_name: None,
             class_name: None,
             theme: 0,
-            flags: FLAG_HAS_CODE | FLAG_ALLOW_CLEAR_USER_DATA | FLAG_ALLOW_BACKUP | FLAG_SUPPORTS_SCREEN_DENSITIES | FLAG_INSTALLED | FLAG_HARDWARE_ACCELERATED | FLAG_EXTRACT_NATIVE_LIBS,
+            // No FLAG_HARDWARE_ACCELERATED yet: ARO windows are software-rendered until the GPU path lands (M3+).
+            flags: FLAG_HAS_CODE | FLAG_ALLOW_CLEAR_USER_DATA | FLAG_ALLOW_BACKUP | FLAG_SUPPORTS_SCREEN_DENSITIES | FLAG_INSTALLED | FLAG_EXTRACT_NATIVE_LIBS,
             private_flags: 0,
             private_flags_ext: 0,
             source_dir: None,

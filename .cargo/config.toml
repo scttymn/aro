@@ -1,0 +1,4 @@
+# Android (bionic) targets: the mapper library that runs inside the app's
+# process is linked with the NDK toolchain (see docs/RUNTIME-NOTES.md).
+[target.x86_64-linux-android]
+linker = "/home/scttymn/.cache/aro/sdk/ndk/android-ndk-r30-beta3//toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android37-clang"

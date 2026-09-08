@@ -119,6 +119,11 @@ impl Service for PackageService {
                 ap::typed_none(reply)?;
                 Ok(true)
             }
+            "queryProperty" | "queryProperties" => {
+                ap::no_exception(reply)?;
+                ap::typed_none(reply)?;
+                Ok(true)
+            }
             "getSdkSandboxPackageName" => {
                 ap::no_exception(reply)?;
                 ap::string16(reply, None)?;

@@ -148,6 +148,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "aro-mapper"
+version = "0.1.0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "aro-props"
 version = "0.0.1"
 dependencies = [

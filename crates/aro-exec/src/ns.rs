@@ -122,6 +122,10 @@ fn assemble_root(spec: &Spec, root: &Path) -> Result<()> {
     for d in ["vendor", "odm", "mnt", "storage", "sdcard", "config"] {
         std::fs::create_dir_all(root.join(d))?;
     }
+    // ARO's "vendor partition": the gralloc mapper library (see arod::prepare_vendor_dir).
+    if let Some(v) = std::env::var_os("ARO_VENDOR_DIR") {
+        bind(std::path::Path::new(&v), &root.join("vendor"), true)?;
+    }
     // GSI keeps system_ext and product inside /system; expose them at / as the image does.
     for d in ["system_ext", "product"] {
         if l.system.join("system").join(d).is_dir() {

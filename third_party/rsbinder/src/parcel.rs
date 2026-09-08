@@ -1273,6 +1273,11 @@ impl Parcel {
         self.write_aligned_data(val_bytes);
     }
 
+    /// ARO debug: a copy of the parcel's data bytes and its object offsets.
+    pub fn aro_debug_bytes(&self) -> (Vec<u8>, Vec<u64>) {
+        (self.data.as_slice().to_vec(), (0..self.objects.len()).map(|i| self.objects.as_slice()[i] as u64).collect())
+    }
+
     pub(crate) fn write_aligned_data(&mut self, data: &[u8]) {
         let unaligned = data.len();
         let aligned = pad_size(unaligned);
@@ -1325,7 +1330,11 @@ impl Parcel {
         use std::os::fd::{AsRawFd, IntoRawFd};
         let dup_fd = rustix::io::fcntl_dupfd_cloexec(fd, 0)?;
         let obj = flat_binder_object::new_with_fd(dup_fd.as_raw_fd(), true);
+        let at = self.pos;
         self.write_object(&obj, false)?;
+        if std::env::var_os("ARO_FD_DEBUG").is_some() {
+            eprintln!("[rsbinder] write_raw_file_descriptor fd={} at pos={} objects_now={}", dup_fd.as_raw_fd(), at, self.objects.len());
+        }
         let _ = dup_fd.into_raw_fd();
         Ok(())
     }

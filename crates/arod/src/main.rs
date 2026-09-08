@@ -79,7 +79,22 @@ fn main() -> Result<()> {
     let controller = services::binder_of(services::activity_task::ActivityClientController);
     *activity.client_controller.lock().unwrap() = Some(controller.clone());
     services::publish(&hub_impl, "activity_task", services::activity_task::ActivityTaskService { client_controller: std::sync::Mutex::new(Some(controller)) });
-    services::publish(&hub_impl, "window", services::window::WindowService);
+    // Composer + window manager.
+    let sf = std::sync::Arc::new(services::surfaceflinger::SurfaceFlinger::new(1280, 800));
+    let composer_client = services::binder_of(services::surfaceflinger::ComposerClient { sf: sf.clone() });
+    *sf.client.lock().unwrap() = Some(composer_client.clone());
+    let display_token = services::token::new_token("display");
+    services::publish(&hub_impl, "SurfaceFlingerAIDL", services::surfaceflinger::ComposerAidl { sf: sf.clone(), client: composer_client, display_token });
+    services::publish(&hub_impl, "SurfaceFlinger", services::surfaceflinger::ComposerLegacy { sf: sf.clone(), transactions: std::sync::atomic::AtomicU32::new(0) });
+    let window_session = services::binder_of(services::window_session::WindowSession { sf: sf.clone(), display: (1280, 800, 160), windows: std::sync::Mutex::new(Vec::new()) });
+    services::publish(&hub_impl, "window", services::window::WindowService { session: window_session });
+    services::publish(&hub_impl, "input_method", services::input_method::InputMethodService);
+    services::publish(&hub_impl, "input", services::input::InputService);
+    // Gralloc: the allocator is a VINTF-stable HAL binder; the mapper half is a
+    // bionic library bound into the app at /vendor/lib64/hw/mapper.aro.so.
+    let gralloc = std::sync::Arc::new(services::allocator::Gralloc::default());
+    hub_impl.register("android.hardware.graphics.allocator.IAllocator/default", services::vintf_binder_of(services::allocator::AllocatorService { gralloc: gralloc.clone() }));
+    let vendor_dir = prepare_vendor_dir(&layout)?;
     services::publish(&hub_impl, "accessibility", services::accessibility::AccessibilityService);
     services::publish(&hub_impl, "user", services::user::UserService);
     services::publish(&hub_impl, "sensorservice", services::sensor::SensorService);
@@ -89,10 +104,17 @@ fn main() -> Result<()> {
     services::publish(&hub_impl, "display", services::display::DisplayService { width: 1280, height: 800, dpi: 160, callbacks: std::sync::Mutex::new(Vec::new()) });
     services::publish(&hub_impl, "activity", services::activity::ActivityRef(activity.clone()));
 
+    // Properties are cheap to regenerate and ARO's extra ones evolve with the runtime.
+    let n = prepare::write_properties(&layout.system, &layout.state)?;
+    log::info!("arod: {n} system properties");
+
     // 4. Launch.
     let exe = std::env::current_exe()?.with_file_name("aro-exec");
     let mut cmd = std::process::Command::new(&exe);
     cmd.env(Session::ENV_BINDERFS, &session.binderfs).env(Session::ENV_SOCKETS, &session.sockets);
+    if let Some(v) = &vendor_dir {
+        cmd.env("ARO_VENDOR_DIR", v);
+    }
     match cli.cmd {
         Cmd::Run { apk, class, method } => {
             cmd.arg("run").arg(apk).arg(class);
@@ -129,4 +151,27 @@ fn main() -> Result<()> {
     let status = cmd.status().with_context(|| format!("spawning {}", exe.display()))?;
     log::info!("arod: app exited with {status}");
     std::process::exit(status.code().unwrap_or(1));
+}
+
+/// Assemble the app's /vendor: `lib64/hw/mapper.aro.so` (built from crates/aro-mapper
+/// for x86_64-linux-android). Looked up via ARO_MAPPER_SO, then next to the arod
+/// binary as `mapper.aro.so`, then in the cargo target tree.
+fn prepare_vendor_dir(layout: &aro_exec::layout::Layout) -> anyhow::Result<Option<std::path::PathBuf>> {
+    let exe_dir = std::env::current_exe()?.parent().map(|p| p.to_path_buf()).unwrap_or_default();
+    let candidates = [
+        std::env::var_os("ARO_MAPPER_SO").map(std::path::PathBuf::from),
+        Some(exe_dir.join("mapper.aro.so")),
+        exe_dir.parent().map(|t| t.join("x86_64-linux-android").join("debug").join("libaro_mapper.so")),
+        exe_dir.parent().map(|t| t.join("x86_64-linux-android").join("release").join("libaro_mapper.so")),
+    ];
+    let Some(src) = candidates.into_iter().flatten().find(|p| p.is_file()) else {
+        log::warn!("gralloc: mapper.aro.so not found (build with `cargo build -p aro-mapper --target x86_64-linux-android`); apps cannot allocate buffers");
+        return Ok(None);
+    };
+    let vendor = layout.runtime.join("vendor");
+    let hw = vendor.join("lib64").join("hw");
+    std::fs::create_dir_all(&hw)?;
+    std::fs::copy(&src, hw.join("mapper.aro.so"))?;
+    log::info!("gralloc: mapper {} -> {}", src.display(), hw.join("mapper.aro.so").display());
+    Ok(Some(vendor))
 }

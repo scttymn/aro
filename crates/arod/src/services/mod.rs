@@ -8,15 +8,21 @@
 pub mod accessibility;
 pub mod activity;
 pub mod activity_task;
+pub mod allocator;
 pub mod camera;
 pub mod compat;
 pub mod display;
+pub mod input;
+pub mod input_codes;
+pub mod input_method;
 pub mod package;
 pub mod registry;
 pub mod sensor;
+pub mod surfaceflinger;
 pub mod token;
 pub mod user;
 pub mod window;
+pub mod window_session;
 
 use rsbinder::{Parcel, Remotable, Result, StatusCode, TransactionCode};
 
@@ -72,6 +78,12 @@ impl<S: Service> Remotable for Raw<S> {
 /// Wrap a service into a binder object without publishing it by name.
 pub fn binder_of<S: Service>(service: S) -> rsbinder::SIBinder {
     let binder = rsbinder::native::Binder::new(Raw(service));
+    rsbinder::Interface::as_binder(&binder)
+}
+
+/// A binder with @VintfStability (HAL interfaces such as the gralloc allocator).
+pub fn vintf_binder_of<S: Service>(service: S) -> rsbinder::SIBinder {
+    let binder = rsbinder::native::Binder::new_with_stability(Raw(service), rsbinder::Stability::Vintf);
     rsbinder::Interface::as_binder(&binder)
 }
 

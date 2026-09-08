@@ -609,7 +609,7 @@ impl ThreadState {
                 sender_pid: 0,
                 sender_euid: 0,
                 data_size: data.data_size() as _,
-                offsets_size: (data.objects.len() * std::mem::size_of::<binder_size_t>()) as _,
+                offsets_size: { if std::env::var_os("ARO_FD_DEBUG").is_some() && data.objects.len() > 0 { eprintln!("[rsbinder] write_transaction_data cmd={} objects={}", cmd, data.objects.len()); } (data.objects.len() * std::mem::size_of::<binder_size_t>()) as _ },
                 data: binder_transaction_data__bindgen_ty_2 {
                     ptr: binder_transaction_data__bindgen_ty_2__bindgen_ty_1 {
                         buffer: data.as_ptr() as _,

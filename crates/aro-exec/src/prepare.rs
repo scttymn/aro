@@ -121,6 +121,12 @@ pub fn write_properties(system: &Path, state: &Path) -> Result<usize> {
         ("aro.version", env!("CARGO_PKG_VERSION")),
         // Boot state Android's own daemons would set; on ARO the bus is up before any app runs.
         ("servicemanager.ready", "true"),
+        // No HIDL in ARO: libhidl callers (gralloc4 fallback, etc.) fail fast instead of waiting.
+        ("hwservicemanager.disabled", "true"),
+        // The GSI build.prop sets this true; ARO has no hwservicemanager to *create*
+        // the .disabled property at boot, so callers would block in WaitForPropertyCreation.
+        // False makes libhidl skip that wait and honour the static .disabled=true above.
+        ("hwservicemanager.always_sets_disabled", "false"),
         ("apexd.status", "ready"),
         ("sys.boot_completed", "1"),
         ("dev.bootcomplete", "1"),
@@ -134,6 +140,16 @@ pub fn write_properties(system: &Path, state: &Path) -> Result<usize> {
     ] {
         props.push((k.to_string(), v.to_string()));
     }
+    // Later entries (ARO extras) override earlier ones (build.prop).
+    let mut deduped: Vec<(String, String)> = Vec::new();
+    for (k, v) in props.into_iter() {
+        if let Some(slot) = deduped.iter_mut().find(|(ek, _)| *ek == k) {
+            slot.1 = v;
+        } else {
+            deduped.push((k, v));
+        }
+    }
+    let props = deduped;
     let dir = state.join("props");
     let _ = std::fs::remove_dir_all(&dir);
     aro_props::write_properties_dir(&dir, &props)

@@ -1,0 +1,141 @@
+== android/view/WindowManager$LayoutParams.<init>(Landroid/os/Parcel;)V
+CALL android.view.ViewGroup$LayoutParams.<init>()V
+CALL android.graphics.Rect.<init>()V
+CALL android.view.InsetsFlags.<init>()V
+CALL android.view.WindowInsets$Type.systemBars()I
+CALL android.view.WindowInsets$Side.all()I
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readFloat ()F  <- 
+PARCEL readFloat ()F  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readFloat ()F  <- 
+PARCEL readFloat ()F  <- 
+PARCEL readLong ()J  <- 
+PARCEL readFloat ()F  <- 
+PARCEL readInt ()I  <- 
+PARCEL readFloat ()F  <- 
+PARCEL readInt ()I  <- 
+PARCEL readStrongBinder ()Landroid/os/IBinder;  <- 
+PARCEL readStrongBinder ()Landroid/os/IBinder;  <- 
+PARCEL readString ()Ljava/lang/String;  <- 
+CALL android.os.Parcelable$Creator.createFromParcel(Landroid/os/Parcel;)Ljava/lang/Object;
+PARCEL readInt ()I  <- 
+PARCEL readFloat ()F  <- 
+PARCEL readInt ()I  <- 
+PARCEL readFloat ()F  <- 
+PARCEL readFloat ()F  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readBoolean ()Z  <- 
+PARCEL readInt ()I  <- 
+PARCEL readLong ()J  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readBoolean ()Z  <- 
+PARCEL readBoolean ()Z  <- 
+PARCEL readBoolean ()Z  <- 
+PARCEL readLong ()J  <- 
+CALL android.os.Parcelable$Creator.createFromParcel(Landroid/os/Parcel;)Ljava/lang/Object;
+PARCEL readInt ()I  <- 
+PARCEL readLong ()J  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readBoolean ()Z  <- 
+PARCEL readBoolean ()Z  <- 
+PARCEL readInt ()I  <- 
+PARCEL readBoolean ()Z  <- 
+PARCEL readBoolean ()Z  <- 
+PARCEL createTypedArray (Landroid/os/Parcelable$Creator;)[Ljava/lang/Object;  <- CREATOR:Parcelable$Creator
+PARCEL readInt ()I  <- 
+PARCEL createTypedArray (Landroid/os/Parcelable$Creator;)[Ljava/lang/Object;  <- CREATOR:Parcelable$Creator
+PARCEL readInt ()I  <- 
+PARCEL readFloat ()F  <- 
+  if-eqz @01dd
+PARCEL readBoolean ()Z  <- 
+PARCEL readBoolean ()Z  <- 
+PARCEL readInt ()I  <- 
+  return-void @01f1
+
+== android/view/WindowManager$LayoutParams.writeToParcel(Landroid/os/Parcel;I)V
+PARCEL writeInt (I)V  <- width:I
+PARCEL writeInt (I)V  <- height:I
+PARCEL writeInt (I)V  <- x:I
+PARCEL writeInt (I)V  <- y:I
+PARCEL writeInt (I)V  <- type:I
+PARCEL writeInt (I)V  <- flags:I
+PARCEL writeInt (I)V  <- privateFlags:I
+PARCEL writeInt (I)V  <- softInputMode:I
+PARCEL writeInt (I)V  <- layoutInDisplayCutoutMode:I
+PARCEL writeInt (I)V  <- gravity:I
+PARCEL writeFloat (F)V  <- horizontalMargin:F
+PARCEL writeFloat (F)V  <- verticalMargin:F
+PARCEL writeInt (I)V  <- format:I
+PARCEL writeInt (I)V  <- windowAnimations:I
+PARCEL writeFloat (F)V  <- alpha:F
+PARCEL writeFloat (F)V  <- dimAmount:F
+PARCEL writeLong (J)V  <- dimColor:J, v1
+PARCEL writeFloat (F)V  <- screenBrightness:F
+PARCEL writeInt (I)V  <- screenBrightnessUnit:I
+PARCEL writeFloat (F)V  <- buttonBrightness:F
+PARCEL writeInt (I)V  <- rotationAnimation:I
+PARCEL writeStrongBinder (Landroid/os/IBinder;)V  <- token:IBinder
+PARCEL writeStrongBinder (Landroid/os/IBinder;)V  <- mWindowContextToken:IBinder
+PARCEL writeString (Ljava/lang/String;)V  <- packageName:String
+CALL android.text.TextUtils.writeToParcel(Ljava/lang/CharSequence;Landroid/os/Parcel;I)V
+PARCEL writeInt (I)V  <- screenOrientation:I
+PARCEL writeFloat (F)V  <- preferredRefreshRate:F
+PARCEL writeInt (I)V  <- preferredDisplayModeId:I
+PARCEL writeFloat (F)V  <- preferredMinDisplayRefreshRate:F
+PARCEL writeFloat (F)V  <- preferredMaxDisplayRefreshRate:F
+PARCEL writeInt (I)V  <- systemUiVisibility:I
+PARCEL writeInt (I)V  <- subtreeSystemUiVisibility:I
+PARCEL writeBoolean (Z)V  <- hasSystemUiListeners:Z
+PARCEL writeInt (I)V  <- inputFeatures:I
+PARCEL writeLong (J)V  <- userActivityTimeout:J, v1
+PARCEL writeInt (I)V  <- left:I
+PARCEL writeInt (I)V  <- top:I
+PARCEL writeInt (I)V  <- right:I
+PARCEL writeInt (I)V  <- bottom:I
+PARCEL writeBoolean (Z)V  <- hasManualSurfaceInsets:Z
+PARCEL writeBoolean (Z)V  <- receiveInsetsIgnoringZOrder:Z
+PARCEL writeBoolean (Z)V  <- preservePreviousSurfaceInsets:Z
+PARCEL writeLong (J)V  <- accessibilityIdOfAnchor:J, v1
+CALL android.text.TextUtils.writeToParcel(Ljava/lang/CharSequence;Landroid/os/Parcel;I)V
+PARCEL writeInt (I)V  <- mColorMode:I
+PARCEL writeLong (J)V  <- hideTimeoutMilliseconds:J, v1
+PARCEL writeInt (I)V  <- appearance:I
+PARCEL writeInt (I)V  <- behavior:I
+PARCEL writeInt (I)V  <- mFitInsetsTypes:I
+PARCEL writeInt (I)V  <- mFitInsetsSides:I
+PARCEL writeBoolean (Z)V  <- mFitInsetsIgnoringVisibility:Z
+PARCEL writeBoolean (Z)V  <- preferMinimalPostProcessing:Z
+PARCEL writeInt (I)V  <- mBlurBehindRadius:I
+PARCEL writeBoolean (Z)V  <- mWallpaperTouchEventsEnabled:Z
+CALL android.view.WindowManager$LayoutParams.canChangeGlobalTouchMode()Z
+PARCEL writeBoolean (Z)V  <- (result)
+PARCEL writeTypedArray ([Landroid/os/Parcelable;I)V  <- providedInsets:InsetsFrameProvider, #0
+PARCEL writeInt (I)V  <- forciblyShownTypes:I
+CALL android.view.WindowManager$LayoutParams.checkNonRecursiveParams()V
+PARCEL writeTypedArray ([Landroid/os/Parcelable;I)V  <- paramsForRotation:WindowManager$LayoutParams, #0
+PARCEL writeInt (I)V  <- mDisplayFlags:I
+PARCEL writeFloat (F)V  <- mDesiredHdrHeadroom:F
+  if-eqz @0140
+PARCEL writeBoolean (Z)V  <- mFrameRateBoostOnTouch:Z
+PARCEL writeBoolean (Z)V  <- mIsFrameRatePowerSavingsBalanced:Z
+PARCEL writeInt (I)V  <- renderingHints:I
+  return-void @0151
+

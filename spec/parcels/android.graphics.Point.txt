@@ -1,0 +1,10 @@
+== android/graphics/Point.readFromParcel(Landroid/os/Parcel;)V
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+  return-void @000c
+
+== android/graphics/Point.writeToParcel(Landroid/os/Parcel;I)V
+PARCEL writeInt (I)V  <- x:I
+PARCEL writeInt (I)V  <- y:I
+  return-void @000a
+

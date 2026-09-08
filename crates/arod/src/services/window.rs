@@ -3,7 +3,9 @@ use super::{codes, Service};
 use crate::aparcel as ap;
 use rsbinder::{Parcel, Result, TransactionCode};
 
-pub struct WindowService;
+pub struct WindowService {
+    pub session: rsbinder::SIBinder,
+}
 
 impl Service for WindowService {
     const DESCRIPTOR: &'static str = "android.view.IWindowManager";
@@ -11,6 +13,12 @@ impl Service for WindowService {
 
     fn handle(&self, name: &str, _code: TransactionCode, data: &mut Parcel, reply: &mut Parcel) -> Result<bool> {
         match name {
+            "openSession" => {
+                let _callback: Option<rsbinder::SIBinder> = data.read()?;
+                ap::no_exception(reply)?;
+                reply.write(&Some(self.session.clone()))?;
+                Ok(true)
+            }
             "getCurrentAnimatorScale" => {
                 ap::no_exception(reply)?;
                 reply.write_f32(1.0)?;

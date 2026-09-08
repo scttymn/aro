@@ -1,0 +1,44 @@
+== android/view/InsetsSource.<init>(Landroid/os/Parcel;)V
+CALL java.lang.Object.<init>()V
+CALL android.graphics.Rect.<init>()V
+CALL android.graphics.Rect.<init>()V
+CALL android.graphics.Rect.<init>()V
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+CALL android.os.Parcelable$Creator.createFromParcel(Landroid/os/Parcel;)Ljava/lang/Object;
+PARCEL readInt ()I  <- 
+  if-eqz @0036
+CALL android.os.Parcelable$Creator.createFromParcel(Landroid/os/Parcel;)Ljava/lang/Object;
+  goto @0042
+PARCEL readBoolean ()Z  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL createTypedArray (Landroid/os/Parcelable$Creator;)[Ljava/lang/Object;  <- CREATOR:Parcelable$Creator
+PARCEL createTypedArray (Landroid/os/Parcelable$Creator;)[Ljava/lang/Object;  <- CREATOR:Parcelable$Creator
+PARCEL readInt ()I  <- 
+  if-eqz @006f
+CALL android.os.Parcelable$Creator.createFromParcel(Landroid/os/Parcel;)Ljava/lang/Object;
+  return-void @007b
+  return-void @007e
+
+== android/view/InsetsSource.writeToParcel(Landroid/os/Parcel;I)V
+PARCEL writeInt (I)V  <- mId:I
+PARCEL writeInt (I)V  <- mType:I
+CALL android.graphics.Rect.writeToParcel(Landroid/os/Parcel;I)V
+  if-eqz @0013
+PARCEL writeInt (I)V  <- #1
+CALL android.graphics.Rect.writeToParcel(Landroid/os/Parcel;I)V
+  goto @001d
+PARCEL writeInt (I)V  <- #0
+PARCEL writeBoolean (Z)V  <- mVisible:Z
+PARCEL writeInt (I)V  <- mFlags:I
+PARCEL writeInt (I)V  <- mSideHint:I
+PARCEL writeTypedArray ([Landroid/os/Parcelable;I)V  <- mBoundingRects:Rect, v5
+PARCEL writeTypedArray ([Landroid/os/Parcelable;I)V  <- mInsetsBoundingRects:InsetsBoundingRect, v5
+  if-eqz @003c
+PARCEL writeInt (I)V  <- #1
+CALL android.graphics.Insets.writeToParcel(Landroid/os/Parcel;I)V
+  return-void @0046
+PARCEL writeInt (I)V  <- #0
+  return-void @004a
+

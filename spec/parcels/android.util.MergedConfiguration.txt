@@ -1,0 +1,24 @@
+== android/util/MergedConfiguration.<init>(Landroid/os/Parcel;)V
+CALL java.lang.Object.<init>()V
+CALL android.content.res.Configuration.<init>()V
+CALL android.content.res.Configuration.<init>()V
+CALL android.content.res.Configuration.<init>()V
+CALL android.util.MergedConfiguration.readFromParcel(Landroid/os/Parcel;)V
+  return-void @001b
+
+== android/util/MergedConfiguration.<init>(Landroid/os/Parcel;Landroid/util/MergedConfiguration-IA;)V
+CALL android.util.MergedConfiguration.<init>(Landroid/os/Parcel;)V
+  return-void @0003
+
+== android/util/MergedConfiguration.readFromParcel(Landroid/os/Parcel;)V
+CALL android.content.res.Configuration.readFromParcel(Landroid/os/Parcel;)V
+CALL android.content.res.Configuration.readFromParcel(Landroid/os/Parcel;)V
+CALL android.content.res.Configuration.readFromParcel(Landroid/os/Parcel;)V
+  return-void @000f
+
+== android/util/MergedConfiguration.writeToParcel(Landroid/os/Parcel;I)V
+CALL android.content.res.Configuration.writeToParcel(Landroid/os/Parcel;I)V
+CALL android.content.res.Configuration.writeToParcel(Landroid/os/Parcel;I)V
+CALL android.content.res.Configuration.writeToParcel(Landroid/os/Parcel;I)V
+  return-void @000f
+

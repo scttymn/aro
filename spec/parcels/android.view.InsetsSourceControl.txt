@@ -1,0 +1,23 @@
+== android/view/InsetsSourceControl.<init>(Landroid/os/Parcel;)V
+CALL java.lang.Object.<init>()V
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readTypedObject (Landroid/os/Parcelable$Creator;)Ljava/lang/Object;  <- CREATOR:Parcelable$Creator
+PARCEL readBoolean ()Z  <- 
+PARCEL readTypedObject (Landroid/os/Parcelable$Creator;)Ljava/lang/Object;  <- CREATOR:Parcelable$Creator
+PARCEL readTypedObject (Landroid/os/Parcelable$Creator;)Ljava/lang/Object;  <- CREATOR:Parcelable$Creator
+PARCEL readBoolean ()Z  <- 
+PARCEL readTypedObject (Landroid/os/Parcelable$Creator;)Ljava/lang/Object;  <- CREATOR:Parcelable$Creator
+  return-void @0043
+
+== android/view/InsetsSourceControl.writeToParcel(Landroid/os/Parcel;I)V
+PARCEL writeInt (I)V  <- mId:I
+PARCEL writeInt (I)V  <- mType:I
+PARCEL writeTypedObject (Landroid/os/Parcelable;I)V  <- mLeash:SurfaceControl, mParcelableFlags:I
+PARCEL writeBoolean (Z)V  <- mInitiallyVisible:Z
+PARCEL writeTypedObject (Landroid/os/Parcelable;I)V  <- mSurfacePosition:Point, mParcelableFlags:I
+PARCEL writeTypedObject (Landroid/os/Parcelable;I)V  <- mInsetsHint:Insets, mParcelableFlags:I
+PARCEL writeBoolean (Z)V  <- mSkipAnimationOnce:Z
+PARCEL writeTypedObject (Landroid/os/Parcelable;I)V  <- mImeStatsToken:ImeTracker$Token, mParcelableFlags:I
+  return-void @0030
+

@@ -1,0 +1,9 @@
+== android/view/InputChannel.writeToParcel(Landroid/os/Parcel;I)V
+  if-eqz @0000
+CALL android.view.InputChannel.nativeWriteToParcel(Landroid/os/Parcel;J)V
+  if-eqz @0009
+CALL android.view.InputChannel.dispose()V
+  return-void @000e
+CALL java.lang.IllegalArgumentException.<init>(Ljava/lang/String;)V
+  throw @0017
+

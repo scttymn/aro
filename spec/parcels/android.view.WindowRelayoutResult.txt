@@ -1,0 +1,32 @@
+== android/view/WindowRelayoutResult.<init>(Landroid/os/Parcel;)V
+CALL android.window.ClientWindowFrames.<init>()V
+CALL android.util.MergedConfiguration.<init>()V
+CALL android.view.InsetsState.<init>()V
+CALL android.view.WindowRelayoutResult.<init>(Landroid/window/ClientWindowFrames;Landroid/util/MergedConfiguration;Landroid/view/InsetsState;Landroid/view/InsetsSourceControl$Array;)V
+CALL android.view.WindowRelayoutResult.readFromParcel(Landroid/os/Parcel;)V
+  return-void @0016
+
+== android/view/WindowRelayoutResult.<init>(Landroid/os/Parcel;Landroid/view/WindowRelayoutResult-IA;)V
+CALL android.view.WindowRelayoutResult.<init>(Landroid/os/Parcel;)V
+  return-void @0003
+
+== android/view/WindowRelayoutResult.readFromParcel(Landroid/os/Parcel;)V
+CALL android.window.ClientWindowFrames.readFromParcel(Landroid/os/Parcel;)V
+CALL android.util.MergedConfiguration.readFromParcel(Landroid/os/Parcel;)V
+CALL android.view.InsetsState.readFromParcel(Landroid/os/Parcel;)Landroid/util/SparseArray;
+PARCEL readTypedObject (Landroid/os/Parcelable$Creator;)Ljava/lang/Object;  <- CREATOR:Parcelable$Creator
+PARCEL readInt ()I  <- 
+PARCEL readTypedObject (Landroid/os/Parcelable$Creator;)Ljava/lang/Object;  <- CREATOR:Parcelable$Creator
+PARCEL readBoolean ()Z  <- 
+  return-void @002f
+
+== android/view/WindowRelayoutResult.writeToParcel(Landroid/os/Parcel;I)V
+CALL android.window.ClientWindowFrames.writeToParcel(Landroid/os/Parcel;I)V
+CALL android.util.MergedConfiguration.writeToParcel(Landroid/os/Parcel;I)V
+CALL android.view.InsetsState.writeToParcel(Landroid/os/Parcel;I)V
+PARCEL writeTypedObject (Landroid/os/Parcelable;I)V  <- activeControls:InsetsSourceControl$Array, v3
+PARCEL writeInt (I)V  <- syncSeqId:I
+PARCEL writeTypedObject (Landroid/os/Parcelable;I)V  <- activityWindowInfo:ActivityWindowInfo, v3
+PARCEL writeBoolean (Z)V  <- usesSyncedInsetsAnimation:Z
+  return-void @0023
+

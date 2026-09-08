@@ -64,6 +64,10 @@ impl IServiceManager for HubRef {
     fn getServiceDebugInfo(&self) -> BinderResult<Vec<ServiceDebugInfo>> { self.0.getServiceDebugInfo() }
 }
 
+/// HAL instances ARO "declares" (the VINTF manifest, in effect): the gralloc
+/// allocator service and the passthrough mapper library `mapper.aro.so`.
+pub const DECLARED_HALS: &[&str] = &["android.hardware.graphics.allocator.IAllocator/default", "mapper/aro"];
+
 impl Interface for Hub {}
 
 impl IServiceManager for Hub {
@@ -100,8 +104,9 @@ impl IServiceManager for Hub {
         Ok(())
     }
     fn isDeclared(&self, name: &str) -> BinderResult<bool> {
-        log::info!("hub: isDeclared {name:?}");
-        Ok(false)
+        let declared = DECLARED_HALS.contains(&name);
+        log::info!("hub: isDeclared {name:?} -> {declared}");
+        Ok(declared)
     }
     fn getDeclaredInstances(&self, _iface: &str) -> BinderResult<Vec<String>> {
         Ok(vec![])

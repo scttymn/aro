@@ -1,0 +1,46 @@
+== android/view/InsetsState.<init>(Landroid/os/Parcel;)V
+CALL java.lang.Object.<init>()V
+CALL android.graphics.Rect.<init>()V
+CALL android.view.DisplayCutout$ParcelableWrapper.<init>()V
+CALL android.graphics.Rect.<init>()V
+CALL android.view.PrivacyIndicatorBounds.<init>()V
+CALL android.util.SequenceUtils.getInitSeq()I
+CALL android.view.InsetsState.readFromParcel(Landroid/os/Parcel;)Landroid/util/SparseArray;
+  return-void @0033
+
+== android/view/InsetsState.readFromParcel(Landroid/os/Parcel;)Landroid/util/SparseArray;
+CALL android.graphics.Rect.readFromParcel(Landroid/os/Parcel;)V
+CALL android.view.DisplayCutout$ParcelableWrapper.readFromParcel(Landroid/os/Parcel;)V
+PARCEL readTypedObject (Landroid/os/Parcelable$Creator;)Ljava/lang/Object;  <- CREATOR:Parcelable$Creator
+CALL android.graphics.Rect.readFromParcel(Landroid/os/Parcel;)V
+PARCEL readTypedObject (Landroid/os/Parcelable$Creator;)Ljava/lang/Object;  <- CREATOR:Parcelable$Creator
+PARCEL readTypedObject (Landroid/os/Parcelable$Creator;)Ljava/lang/Object;  <- CREATOR:Parcelable$Creator
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+  if-nez @0039
+CALL android.util.SparseArray.<init>(I)V
+  goto @0040
+CALL android.util.SparseArray.clear()V
+  if-ge @0045
+PARCEL readTypedObject (Landroid/os/Parcelable$Creator;)Ljava/lang/Object;  <- CREATOR:Parcelable$Creator
+CALL android.view.InsetsSource.getId()I
+CALL android.util.SparseArray.append(ILjava/lang/Object;)V
+  goto @0058
+  return-object @0059
+
+== android/view/InsetsState.writeToParcel(Landroid/os/Parcel;I)V
+CALL android.graphics.Rect.writeToParcel(Landroid/os/Parcel;I)V
+CALL android.view.DisplayCutout$ParcelableWrapper.writeToParcel(Landroid/os/Parcel;I)V
+PARCEL writeTypedObject (Landroid/os/Parcelable;I)V  <- mRoundedCorners:RoundedCorners, v5
+CALL android.graphics.Rect.writeToParcel(Landroid/os/Parcel;I)V
+PARCEL writeTypedObject (Landroid/os/Parcelable;I)V  <- mPrivacyIndicatorBounds:PrivacyIndicatorBounds, v5
+PARCEL writeTypedObject (Landroid/os/Parcelable;I)V  <- mDisplayShape:DisplayShape, v5
+PARCEL writeInt (I)V  <- mSeq:I
+CALL android.util.SparseArray.size()I
+PARCEL writeInt (I)V  <- (result)
+  if-ge @002d
+CALL android.util.SparseArray.valueAt(I)Ljava/lang/Object;
+PARCEL writeTypedObject (Landroid/os/Parcelable;I)V  <- (result), v5
+  goto @003c
+  return-void @003d
+

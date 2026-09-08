@@ -1,0 +1,11 @@
+[package]
+name = "aro-mapper"
+version = "0.1.0"
+edition = "2021"
+description = "ARO gralloc mapper (IMapper stable-C v5) loaded into Android app processes as mapper.aro.so"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+libc = "0.2"
