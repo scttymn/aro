@@ -55,11 +55,6 @@ fn main() -> Result<()> {
         bail!("no unpacked system image at {} (run: aro-image unpack)", layout.system.display());
     }
 
-    // 0. Host-facing notification helper: fork it while we are still single
-    // threaded and in the host namespace with the real uid (the session bus
-    // authenticates by peer credentials, which the namespace would break).
-    let notifier = notify::Notifier::spawn().map(std::sync::Arc::new);
-
     // 1. Session namespaces (single-threaded here).
     let session = session::enter(&layout)?;
     prepare::prepare(&layout)?;
@@ -130,6 +125,11 @@ fn main() -> Result<()> {
     services::publish(&hub_impl, "input_method", services::input_method::InputMethodService);
     services::publish(&hub_impl, "input", services::input::InputService);
     services::publish(&hub_impl, "audio", services::audio::AudioService);
+    // Notifications go to whatever owns org.freedesktop.Notifications on the session bus.
+    let notifier = match notify::Notifier::connect(session.host_uid) {
+        Ok(n) => Some(std::sync::Arc::new(n)),
+        Err(e) => { log::warn!("notify: no host notification service ({e}); notifications logged only"); None }
+    };
     services::publish(&hub_impl, "notification", services::notification::NotificationService { notifier });
     // The allocator is a VINTF-stable HAL binder; the mapper half is a bionic
     // library bound into the app at /vendor/lib64/hw/mapper.aro.so.

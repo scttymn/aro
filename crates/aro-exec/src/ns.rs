@@ -79,7 +79,7 @@ fn tmpfs(dst: &Path, mode: &str) -> Result<()> {
 pub fn mount_binderfs(bfs: &Path) -> Result<()> {
     std::fs::create_dir_all(bfs)?;
     mount(Some("binder"), bfs, Some("binder"), MsFlags::empty(), None::<&str>).context("mount binderfs (kernel needs CONFIG_ANDROID_BINDERFS)")?;
-    let ctl = std::fs::File::open(bfs.join("binder-control"))?;
+    let ctl = std::fs::File::open(bfs.join("binder-control")).context("open binder-control")?;
     #[repr(C)]
     struct BinderfsDevice {
         name: [u8; 256],
