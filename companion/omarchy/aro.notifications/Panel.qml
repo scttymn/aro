@@ -125,7 +125,7 @@ Panel {
             text: String.fromCharCode(0xf17b) + "  Notifications"
             color: root.fg
             font.family: Style.font.family
-            font.pixelSize: Style.space(20)
+            font.pixelSize: Style.font.title
             font.bold: true
           }
 
@@ -137,7 +137,7 @@ Panel {
             text: "Clear all"
             color: clearMouse.containsMouse ? Color.accent : Color.muted
             font.family: Style.font.family
-            font.pixelSize: Style.space(14)
+            font.pixelSize: Style.font.bodySmall
 
             MouseArea {
               id: clearMouse
@@ -156,7 +156,7 @@ Panel {
           text: "No notifications"
           color: Color.muted
           font.family: Style.font.family
-          font.pixelSize: Style.space(15)
+          font.pixelSize: Style.font.body
           horizontalAlignment: Text.AlignHCenter
           topPadding: Style.space(24)
           bottomPadding: Style.space(24)
@@ -216,7 +216,7 @@ Panel {
                       text: model.appName
                       color: Color.muted
                       font.family: Style.font.family
-                      font.pixelSize: Style.space(11)
+                      font.pixelSize: Style.font.caption
                       font.capitalization: Font.AllUppercase
                       elide: Text.ElideRight
                       width: parent.width - ongoingTag.width - dismissX.width - Style.space(12)
@@ -228,7 +228,7 @@ Panel {
                       text: "ongoing"
                       color: Color.notifications.countdown
                       font.family: Style.font.family
-                      font.pixelSize: Style.space(11)
+                      font.pixelSize: Style.font.caption
                     }
 
                     // × dismiss (ongoing notifications can't be swiped away).
@@ -238,7 +238,7 @@ Panel {
                       text: "✕"
                       color: xMouse.containsMouse ? Color.accent : Color.muted
                       font.family: Style.font.family
-                      font.pixelSize: Style.space(13)
+                      font.pixelSize: Style.font.subtitle
 
                       MouseArea {
                         id: xMouse
@@ -257,7 +257,7 @@ Panel {
                     visible: text !== ""
                     color: root.fg
                     font.family: Style.font.family
-                    font.pixelSize: Style.space(15)
+                    font.pixelSize: Style.font.subtitle
                     font.bold: true
                     elide: Text.ElideRight
                   }
@@ -268,7 +268,7 @@ Panel {
                     visible: text !== ""
                     color: Color.notifications.text
                     font.family: Style.font.family
-                    font.pixelSize: Style.space(14)
+                    font.pixelSize: Style.font.body
                     wrapMode: Text.WordWrap
                     maximumLineCount: 4
                     elide: Text.ElideRight
