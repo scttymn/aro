@@ -54,7 +54,7 @@ written by `aro-props`; `linkerconfig` and `derive_classpath` run inside the
 namespace on first start; apex-info-list.xml and aconfig flag storage generated
 from the image; a stand-in `logd` socket so Android logs reach the terminal.
 
-| M3 | done (2026-09-08): hello app renders its Activity in software into ARO gralloc buffers, the frame is shown in a real Hyprland window, the window follows the tiled size (`IWindow.resized`), and desktop pointer input reaches the app (a tap fires `onClick` and the app redraws). Buffer-release callbacks are still deferred: apps allocate fresh buffers on demand, which is enough for UI-driven redraws. | see git log |
+| M3 | done (2026-09-08): hello app renders its Activity in software into ARO gralloc buffers, the frame is shown in a real Hyprland window, the window follows the tiled size (`IWindow.resized`), and desktop pointer input reaches the app (a tap fires `onClick` and the app redraws). Buffers are recycled through the app's BufferReleaseChannel, so rendering continues indefinitely (resize, input-driven redraws). | see git log |
 
 ## M2 — Bus, Package and Activity services (subsystems 2, 3, 4)
 

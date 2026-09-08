@@ -25,8 +25,8 @@ Full detail and exit criteria are in [docs/MILESTONES.md](docs/MILESTONES.md).
 | M7 ARM native libs | In-process arm64 translator so arm64-only APKs run | ⏳ planned |
 
 **Today:** `arod app some.apk` launches an app as a native process and shows it
-in a Hyprland window you can click. Rendering is software (the GSI has no GPU
-driver path yet); buffer-release callbacks and continuous animation are open
-items inside M3's composer.
+in a Hyprland window that follows your tiling and display scale, takes clicks,
+and keeps rendering (buffers are recycled through the app's release channel,
+as SurfaceFlinger does). Rendering is software: the GSI has no GPU driver path yet.
 
 Rust toolchain is managed by mise (`.mise.toml`); `cargo build` from the repo root.

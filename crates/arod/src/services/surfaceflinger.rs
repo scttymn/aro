@@ -9,7 +9,7 @@
 use super::Service;
 use crate::aparcel as ap;
 use rsbinder::{Parcel, Result, SIBinder, TransactionCode};
-use std::os::fd::{AsFd, AsRawFd, OwnedFd};
+use std::os::fd::{AsFd, AsRawFd, FromRawFd, OwnedFd};
 use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -33,11 +33,14 @@ pub struct SurfaceFlinger {
     pub client: Mutex<Option<SIBinder>>,
     /// Vsync period, from the host output's refresh rate.
     pub frame_interval_ns: i64,
+    /// The app's BufferReleaseChannel producer end (from layer_state_t.bufferReleaseChannel):
+    /// BLASTBufferQueue's blocked dequeueBuffer polls the consumer end, so releases go here.
+    pub release_channel: Arc<Mutex<Option<OwnedFd>>>,
 }
 
 impl SurfaceFlinger {
     pub fn new(width: u32, height: u32, frame_interval_ns: i64) -> Self {
-        SurfaceFlinger { layers: Mutex::new(Vec::new()), next_layer_id: AtomicI32::new(1), width, height, client: Mutex::new(None), frame_interval_ns }
+        SurfaceFlinger { layers: Mutex::new(Vec::new()), next_layer_id: AtomicI32::new(1), width, height, client: Mutex::new(None), frame_interval_ns, release_channel: Arc::new(Mutex::new(None)) }
     }
 
     pub fn create_layer(&self, name: &str, width: u32, height: u32) -> Arc<Layer> {
@@ -149,6 +152,7 @@ pub struct PostedBuffer {
     pub gb_id: u64,
     pub frame_number: u64,
     pub release_listener: Option<SIBinder>,
+    pub channel: Arc<Mutex<Option<OwnedFd>>>,
 }
 
 const GB01: i32 = 0x4742_3031; // GraphicBuffer flatten magic 'GB01'
@@ -201,11 +205,80 @@ fn parse_posted_buffer(data: &mut Parcel) -> Option<PostedBuffer> {
     let frame_number = data.read_u64().ok()?;
     let release_listener: Option<SIBinder> = data.read().ok().flatten();
     data.set_data_position(save);
-    Some(PostedBuffer { gralloc_id, width: w, height: hgt, gb_id, frame_number, release_listener })
+    Some(PostedBuffer { gralloc_id, width: w, height: hgt, gb_id, frame_number, release_listener, channel: Arc::new(Mutex::new(None)) })
+}
+
+/// Look for a BufferReleaseChannel producer endpoint in a transaction: an fd
+/// object preceded by a UTF-16 name (ProducerEndpoint::writeToParcel), which
+/// is what `Transaction::setBufferReleaseChannel` sends. Buffer and fence fds
+/// are excluded by shape (they follow Flattenable data, not a string).
+fn find_release_channel(data: &mut Parcel) -> Option<(String, OwnedFd)> {
+    let (bytes, objs) = data.aro_debug_bytes();
+    let rd = |o: usize| -> i32 { i32::from_le_bytes([bytes[o], bytes[o + 1], bytes[o + 2], bytes[o + 3]]) };
+    for &o in &objs {
+        let o = o as usize;
+        if o + FLAT_OBJ > bytes.len() || rd(o) != 0x6664_2a85 {
+            continue; // not BINDER_TYPE_FD
+        }
+        // A ProducerEndpoint name: [i32 len][utf16 chars + NUL, padded] right before the fd object.
+        // Walk back: find a plausible length prefix whose padded utf16 payload ends at `o`.
+        let mut name = None;
+        for len in 1..=64usize {
+            let payload = ((len + 1) * 2 + 3) & !3;
+            if o < payload + 4 {
+                break;
+            }
+            let lp = o - payload - 4;
+            if rd(lp) as usize == len {
+                let mut units = Vec::with_capacity(len);
+                for k in 0..len {
+                    units.push(u16::from_le_bytes([bytes[lp + 4 + k * 2], bytes[lp + 5 + k * 2]]));
+                }
+                if let Ok(sname) = String::from_utf16(&units) {
+                    if sname.chars().all(|c| !c.is_control()) {
+                        name = Some(sname);
+                        break;
+                    }
+                }
+            }
+        }
+        let Some(name) = name else { continue };
+        let fd = rd(o + 8);
+        let dup = unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 0) };
+        if dup < 0 {
+            log::warn!("sf: dup release channel fd {fd}: {}", std::io::Error::last_os_error());
+            return None;
+        }
+        return Some((name, unsafe { OwnedFd::from_raw_fd(dup) }));
+    }
+    None
+}
+
+/// Write one release into the BufferReleaseChannel: Message::flatten =
+/// Fence (u32 numFds=0 for NO_FENCE) then bufferId lo/hi, frame lo/hi, maxAcquired.
+fn write_release_channel(fd: &OwnedFd, pb: &PostedBuffer) -> std::io::Result<()> {
+    let mut m = Vec::with_capacity(24);
+    m.extend_from_slice(&0u32.to_le_bytes()); // fence: no fds
+    m.extend_from_slice(&(pb.gb_id as u32).to_le_bytes());
+    m.extend_from_slice(&((pb.gb_id >> 32) as u32).to_le_bytes());
+    m.extend_from_slice(&(pb.frame_number as u32).to_le_bytes());
+    m.extend_from_slice(&((pb.frame_number >> 32) as u32).to_le_bytes());
+    m.extend_from_slice(&1u32.to_le_bytes()); // maxAcquiredBufferCount
+    let rc = unsafe { libc::send(fd.as_raw_fd(), m.as_ptr() as *const _, m.len(), libc::MSG_DONTWAIT | libc::MSG_NOSIGNAL) };
+    if rc < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
 }
 
 /// ITransactionCompletedListener.onReleaseBuffer(ReleaseCallbackId, Fence, maxAcquiredBufferCount), oneway.
 pub fn release_buffer(pb: &PostedBuffer) {
+    if let Some(ch) = pb.channel.lock().unwrap().as_ref() {
+        match write_release_channel(ch, pb) {
+            Ok(()) => log::debug!("sf: release channel <- gb={:#x} frame={}", pb.gb_id, pb.frame_number),
+            Err(e) => log::warn!("sf: release channel write failed: {e}"),
+        }
+    }
     let Some(listener) = &pb.release_listener else { return };
     let r = (|| -> anyhow::Result<()> {
         let proxy = listener.as_proxy().ok_or_else(|| anyhow::anyhow!("release listener is not a proxy"))?;
@@ -238,7 +311,12 @@ impl Service for ComposerLegacy {
                 // The posted buffer is a flattened GraphicBuffer; its ARO native handle
                 // carries "AROB" magic + our buffer id, which we scan for rather than
                 // parsing the whole layer_state_t.
-                if let Some(pb) = parse_posted_buffer(data) {
+                if let Some((name, fd)) = find_release_channel(data) {
+                    log::info!("sf: buffer release channel from {name:?}");
+                    *self.sf.release_channel.lock().unwrap() = Some(fd);
+                }
+                if let Some(mut pb) = parse_posted_buffer(data) {
+                    pb.channel = self.sf.release_channel.clone();
                     log::info!("sf: setTransactionState #{n} posts ARO buffer {} ({}x{}) gb={:#x} frame={} release={}", pb.gralloc_id, pb.width, pb.height, pb.gb_id, pb.frame_number, pb.release_listener.is_some());
                     match (&self.presenter, self.gralloc.buffers.lock().unwrap().get(&pb.gralloc_id).cloned()) {
                         (Some(p), Some(buf)) => p.present(buf, pb),
