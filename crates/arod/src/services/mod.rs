@@ -9,6 +9,8 @@ pub mod accessibility;
 pub mod activity;
 pub mod activity_task;
 pub mod allocator;
+pub mod audio;
+pub mod audio_codes;
 pub mod camera;
 pub mod compat;
 pub mod display;

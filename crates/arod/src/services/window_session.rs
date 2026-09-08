@@ -23,6 +23,7 @@ pub struct WindowSession {
     pub sf: Arc<SurfaceFlinger>,
     pub display: (i32, i32, i32),
     pub windows: Mutex<Vec<AppWindow>>,
+    pub input: Arc<crate::input_channel::InputHub>,
 }
 
 impl WindowSession {
@@ -125,6 +126,10 @@ impl Service for WindowSession {
                     return Err(rsbinder::StatusCode::Unknown);
                 }
                 let (ours, theirs) = unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) };
+                // Publish the server end so the compositor can inject input events.
+                if let Ok(dup) = ours.try_clone() {
+                    *self.input.fd.lock().unwrap() = Some(dup);
+                }
                 let token = super::token::new_token("input-channel");
                 log::info!("window: addToDisplay -> layer {} with input channel", layer.id);
                 ap::no_exception(reply)?;

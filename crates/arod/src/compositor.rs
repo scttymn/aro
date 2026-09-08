@@ -5,11 +5,12 @@
 //!
 //! One toplevel per app for now (M3). Buffers are software-rendered RGBX/RGBA,
 //! copied into a shared-memory pool the compositor reads.
+use crate::input_channel::{InputHub, ACTION_DOWN, ACTION_MOVE, ACTION_UP};
 use crate::services::allocator::Buffer;
 use std::os::fd::{AsFd, AsRawFd, FromRawFd, OwnedFd};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
-use wayland_client::protocol::{wl_buffer, wl_compositor, wl_registry, wl_shm, wl_shm_pool, wl_surface};
+use wayland_client::protocol::{wl_buffer, wl_compositor, wl_pointer, wl_registry, wl_seat, wl_shm, wl_shm_pool, wl_surface};
 use wayland_client::{Connection, Dispatch, QueueHandle};
 use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
 
@@ -26,7 +27,7 @@ pub struct Presenter {
 impl Presenter {
     /// Start the Wayland thread. Returns None if there is no compositor
     /// (arod still runs headless; apps just won't be shown).
-    pub fn spawn(title: String) -> Option<Presenter> {
+    pub fn spawn(title: String, input: Arc<InputHub>) -> Option<Presenter> {
         let conn = match Connection::connect_to_env() {
             Ok(c) => c,
             Err(e) => {
@@ -38,7 +39,7 @@ impl Presenter {
         std::thread::Builder::new()
             .name("aro-compositor".into())
             .spawn(move || {
-                if let Err(e) = run(conn, rx, title) {
+                if let Err(e) = run(conn, rx, title, input) {
                     log::error!("compositor: {e}");
                 }
             })
@@ -68,9 +69,17 @@ struct App {
     buffer_busy: bool,
     pending: Option<Arc<Buffer>>,
     last_size: (u32, u32),
+    // Input.
+    input: Arc<InputHub>,
+    seat: Option<wl_seat::WlSeat>,
+    pointer: Option<wl_pointer::WlPointer>,
+    ptr_x: f32,
+    ptr_y: f32,
+    ptr_down: bool,
+    over_surface: bool,
 }
 
-fn run(conn: Connection, rx: Receiver<Frame>, title: String) -> anyhow::Result<()> {
+fn run(conn: Connection, rx: Receiver<Frame>, title: String, input: Arc<InputHub>) -> anyhow::Result<()> {
     let mut queue = conn.new_event_queue();
     let qh = queue.handle();
     let display = conn.display();
@@ -92,6 +101,13 @@ fn run(conn: Connection, rx: Receiver<Frame>, title: String) -> anyhow::Result<(
         buffer_busy: false,
         pending: None,
         last_size: (0, 0),
+        input,
+        seat: None,
+        pointer: None,
+        ptr_x: 0.0,
+        ptr_y: 0.0,
+        ptr_down: false,
+        over_surface: false,
     };
 
     // Bind globals.
@@ -119,8 +135,8 @@ fn run(conn: Connection, rx: Receiver<Frame>, title: String) -> anyhow::Result<(
         queue.blocking_dispatch(&mut app)?;
     }
 
-    let wfd = conn.prepare_read().map(|g| g.connection_fd().as_raw_fd()).unwrap_or(-1);
-    let _ = wfd;
+    let mut presents = 0u32;
+    let mut test_tap: Option<(f32, f32, std::time::Instant, bool)> = None;
     loop {
         if app.closed {
             log::info!("compositor: window closed");
@@ -133,8 +149,27 @@ fn run(conn: Connection, rx: Receiver<Frame>, title: String) -> anyhow::Result<(
         if app.pending.is_some() && !app.buffer_busy {
             if let Some(buf) = app.pending.take() {
                 present_buffer(&mut app, &qh, &buf);
+                presents += 1;
+                // Debug: inject a tap at the window centre a moment after the
+                // first frame, to exercise input without a desktop pointer.
+                if presents == 1 && std::env::var_os("ARO_TEST_TAP").is_some() {
+                    let (cx, cy) = (buf.desc.width as f32 / 2.0, buf.desc.height as f32 / 2.0);
+                    test_tap = Some((cx, cy, std::time::Instant::now(), false));
+                }
             }
         }
+        if let Some((cx, cy, at, down_sent)) = test_tap {
+            if !down_sent && at.elapsed() >= std::time::Duration::from_millis(500) {
+                log::info!("compositor: test tap DOWN at ({cx:.0},{cy:.0})");
+                app.input.send_motion(ACTION_DOWN, cx, cy);
+                test_tap = Some((cx, cy, at, true));
+            } else if down_sent && at.elapsed() >= std::time::Duration::from_millis(800) {
+                log::info!("compositor: test tap UP at ({cx:.0},{cy:.0})");
+                app.input.send_motion(ACTION_UP, cx, cy);
+                test_tap = None;
+            }
+        }
+        app.input.drain_finished();
         conn.flush()?;
         // Block briefly on Wayland events, but wake often to check the channel.
         queue.dispatch_pending(&mut app)?;
@@ -274,6 +309,9 @@ impl Dispatch<wl_registry::WlRegistry, ()> for App {
                 "xdg_wm_base" => {
                     app.wm_base = Some(registry.bind::<xdg_wm_base::XdgWmBase, _, _>(name, version.min(3), qh, ()));
                 }
+                "wl_seat" => {
+                    app.seat = Some(registry.bind::<wl_seat::WlSeat, _, _>(name, version.min(5), qh, ()));
+                }
                 _ => {}
             }
         }
@@ -319,6 +357,60 @@ impl Dispatch<wl_buffer::WlBuffer, ()> for App {
     fn event(app: &mut Self, _: &wl_buffer::WlBuffer, event: wl_buffer::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
         if let wl_buffer::Event::Release = event {
             app.buffer_busy = false;
+        }
+    }
+}
+
+
+impl Dispatch<wl_seat::WlSeat, ()> for App {
+    fn event(app: &mut Self, seat: &wl_seat::WlSeat, event: wl_seat::Event, _: &(), _: &Connection, qh: &QueueHandle<Self>) {
+        if let wl_seat::Event::Capabilities { capabilities } = event {
+            if let wayland_client::WEnum::Value(caps) = capabilities {
+                if caps.contains(wl_seat::Capability::Pointer) && app.pointer.is_none() {
+                    app.pointer = Some(seat.get_pointer(qh, ()));
+                }
+            }
+        }
+    }
+}
+
+impl Dispatch<wl_pointer::WlPointer, ()> for App {
+    fn event(app: &mut Self, _: &wl_pointer::WlPointer, event: wl_pointer::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+        use wl_pointer::Event;
+        const BTN_LEFT: u32 = 0x110;
+        match event {
+            Event::Enter { surface_x, surface_y, .. } => {
+                app.over_surface = true;
+                app.ptr_x = surface_x as f32;
+                app.ptr_y = surface_y as f32;
+            }
+            Event::Leave { .. } => {
+                app.over_surface = false;
+            }
+            Event::Motion { surface_x, surface_y, .. } => {
+                app.ptr_x = surface_x as f32;
+                app.ptr_y = surface_y as f32;
+                if app.ptr_down {
+                    app.input.send_motion(ACTION_MOVE, app.ptr_x, app.ptr_y);
+                }
+            }
+            Event::Button { button, state, .. } => {
+                if button != BTN_LEFT {
+                    return;
+                }
+                match state {
+                    wayland_client::WEnum::Value(wl_pointer::ButtonState::Pressed) => {
+                        app.ptr_down = true;
+                        app.input.send_motion(ACTION_DOWN, app.ptr_x, app.ptr_y);
+                    }
+                    wayland_client::WEnum::Value(wl_pointer::ButtonState::Released) => {
+                        app.ptr_down = false;
+                        app.input.send_motion(ACTION_UP, app.ptr_x, app.ptr_y);
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
         }
     }
 }
