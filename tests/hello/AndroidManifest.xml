@@ -4,7 +4,7 @@
     android:versionCode="1"
     android:versionName="1.0">
     <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="36" />
-    <application android:label="Hello ARO" android:theme="@android:style/Theme.DeviceDefault.Light">
+    <application android:label="Hello ARO" android:icon="@mipmap/ic_launcher" android:theme="@android:style/Theme.DeviceDefault.Light">
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

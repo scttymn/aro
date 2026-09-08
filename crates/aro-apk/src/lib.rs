@@ -141,6 +141,59 @@ pub fn parse_manifest(data: &[u8]) -> Result<Manifest> {
     Ok(m)
 }
 
+/// Best-effort extract the app's launcher icon bytes from an APK.
+///
+/// Resolving `android:icon` properly needs the resources.arsc table (still a
+/// TODO); this instead relies on the AOSP convention that the launcher icon is
+/// named `ic_launcher` under `res/mipmap-*` or `res/drawable-*`, and picks the
+/// highest-density raster it finds. Returns (bytes, extension). Adaptive-only
+/// icons (an `ic_launcher.xml` with no raster fallback) yield None — the caller
+/// falls back to a generic badge.
+pub fn extract_icon(apk: &Path) -> Option<(Vec<u8>, &'static str)> {
+    let file = std::fs::File::open(apk).ok()?;
+    let mut zip = zip::ZipArchive::new(file).ok()?;
+    // Density rank: higher is better. anydpi is usually the adaptive XML, so
+    // it ranks below every raster bucket.
+    let density = |name: &str| -> i32 {
+        for (kw, score) in [
+            ("xxxhdpi", 6), ("xxhdpi", 5), ("xhdpi", 4), ("hdpi", 3), ("mdpi", 2), ("nodpi", 1),
+        ] {
+            if name.contains(kw) {
+                return score;
+            }
+        }
+        0
+    };
+    let mut best: Option<(i32, String, &'static str)> = None;
+    for i in 0..zip.len() {
+        let Ok(entry) = zip.by_index(i) else { continue };
+        let name = entry.name().to_string();
+        let ext = if name.ends_with(".png") {
+            "png"
+        } else if name.ends_with(".webp") {
+            "webp"
+        } else {
+            continue;
+        };
+        let is_launcher = (name.starts_with("res/mipmap") || name.starts_with("res/drawable"))
+            && name.rsplit('/').next().is_some_and(|f| f.starts_with("ic_launcher"));
+        if !is_launcher {
+            continue;
+        }
+        // Prefer the plain ic_launcher over _round / _foreground variants.
+        let plain = name.rsplit('/').next().is_some_and(|f| f.starts_with("ic_launcher."));
+        let score = density(&name) * 2 + if plain { 1 } else { 0 };
+        if best.as_ref().is_none_or(|(b, _, _)| score > *b) {
+            best = Some((score, name, ext));
+        }
+    }
+    let (_, name, ext) = best?;
+    let mut entry = zip.by_name(&name).ok()?;
+    let mut data = Vec::with_capacity(entry.size() as usize);
+    std::io::Read::read_to_end(&mut entry, &mut data).ok()?;
+    Some((data, ext))
+}
+
 /// Read and parse the manifest inside an APK.
 pub fn inspect(apk: &Path) -> Result<Manifest> {
     let file = std::fs::File::open(apk).with_context(|| format!("opening {}", apk.display()))?;

@@ -143,6 +143,20 @@ fn main() -> Result<()> {
     services::publish(&hub_impl, "input", services::input::InputService);
     services::publish(&hub_impl, "audio", services::audio::AudioService);
     // Notifications go to whatever owns org.freedesktop.Notifications on the session bus.
+    // The launched app's launcher icon, extracted from the APK and written to
+    // the runtime icons dir, for the shade avatar. None → the widget shows a
+    // generic Android badge instead.
+    let app_icon: Option<String> = match &cli.cmd {
+        Cmd::App { apk, .. } => aro_apk::extract_icon(&apk.canonicalize().unwrap_or_else(|_| apk.clone())).and_then(|(bytes, ext)| {
+            let dir = layout.runtime.join("icons");
+            std::fs::create_dir_all(&dir).ok()?;
+            let path = dir.join(format!("{package}.{ext}"));
+            std::fs::write(&path, &bytes).ok()?;
+            Some(path.to_string_lossy().into_owned())
+        }),
+        _ => None,
+    };
+
     let fire_activity = activity.clone();
     let fire: std::sync::Arc<dyn Fn(&pending_intent::Target) + Send + Sync> =
         std::sync::Arc::new(move |t: &pending_intent::Target| {
@@ -163,7 +177,7 @@ fn main() -> Result<()> {
         let n = n.clone();
         shade.set_close_host(std::sync::Arc::new(move |pkg, tag, id| n.close(pkg, tag, id)));
     }
-    services::publish(&hub_impl, "notification", services::notification::NotificationService { notifier, pending_intents: pending_intents.clone(), shade: shade.clone() });
+    services::publish(&hub_impl, "notification", services::notification::NotificationService { notifier, pending_intents: pending_intents.clone(), shade: shade.clone(), app_icon });
     // Network: mirror the host's connection (NetworkManager on the system bus).
     if let Err(e) = dnsproxy::serve(&session.sockets) { log::warn!("dnsproxyd: {e}"); }
     let hostnet = hostnet::probe(session.host_uid);

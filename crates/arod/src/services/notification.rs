@@ -13,6 +13,8 @@ pub struct NotificationService {
     pub notifier: Option<Arc<Notifier>>,
     pub pending_intents: Arc<PiRegistry>,
     pub shade: Arc<crate::shade::Shade>,
+    /// This app's launcher icon path for the shade avatar, or None for a badge.
+    pub app_icon: Option<String>,
 }
 
 // flat_binder_object header type B_PACK_CHARS('s','b','*',0x85): a binder we published,
@@ -100,7 +102,7 @@ impl Service for NotificationService {
                 // The shade keeps the notification after the toast fades. ongoing
                 // detection (Notification.flags) is not wired yet — see shade.rs.
                 let key = (pkg.clone(), tag.clone(), id);
-                self.shade.post(key, &pkg, &pkg, &summary, &body, resident, target);
+                self.shade.post(key, &pkg, &pkg, &summary, &body, resident, self.app_icon.as_deref().unwrap_or(""), target);
                 ap::no_exception(reply)?;
                 Ok(true)
             }

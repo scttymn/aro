@@ -39,6 +39,8 @@ pub struct Note {
     pub body: String,
     pub ongoing: bool,
     pub ts: i64,
+    /// Filesystem path to the app's launcher icon, or "" for a generic badge.
+    pub icon: String,
     /// (package, tag, android id) — identity for replace/cancel; not sent.
     #[serde(skip)]
     pub key: (String, Option<String>, i32),
@@ -151,7 +153,7 @@ impl Shade {
     /// Add or replace a notification (Android re-posts the same (pkg,tag,id) to
     /// update in place) and tell every connected widget.
     #[allow(clippy::too_many_arguments)]
-    pub fn post(&self, key: (String, Option<String>, i32), app: &str, app_name: &str, title: &str, body: &str, ongoing: bool, target: Option<Target>) {
+    pub fn post(&self, key: (String, Option<String>, i32), app: &str, app_name: &str, title: &str, body: &str, ongoing: bool, icon: &str, target: Option<Target>) {
         let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
         let mut inner = self.inner.lock().unwrap();
         let id = match inner.notes.iter().position(|n| n.key == key) {
@@ -162,7 +164,7 @@ impl Shade {
                 id
             }
         };
-        let note = Note { id, app: app.into(), app_name: app_name.into(), title: title.into(), body: body.into(), ongoing, ts, key: key.clone(), target };
+        let note = Note { id, app: app.into(), app_name: app_name.into(), title: title.into(), body: body.into(), ongoing, ts, icon: icon.into(), key: key.clone(), target };
         match inner.notes.iter().position(|n| n.key == key) {
             Some(i) => inner.notes[i] = note.clone(),
             None => inner.notes.push(note.clone()),

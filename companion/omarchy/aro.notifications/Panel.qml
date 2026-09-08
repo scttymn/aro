@@ -43,7 +43,7 @@ Panel {
   }
 
   function upsert(n) {
-    var row = { nid: n.id, app: n.app || "", appName: n.appName || n.app || "", title: n.title || "", body: n.body || "", ongoing: n.ongoing === true, ts: n.ts || 0 }
+    var row = { nid: n.id, app: n.app || "", appName: n.appName || n.app || "", title: n.title || "", body: n.body || "", ongoing: n.ongoing === true, ts: n.ts || 0, icon: n.icon || "" }
     var i = indexOfId(n.id)
     if (i >= 0) notes.set(i, row)
     else notes.insert(0, row) // newest on top
@@ -210,22 +210,39 @@ Panel {
                   anchors.rightMargin: Style.space(10)
                   spacing: Style.space(9)
 
-                  // App avatar: first letter of the package/app label.
-                  Rectangle {
+                  // Avatar: the app's launcher icon when arod extracted one,
+                  // otherwise a generic Android badge marking a system/iconless
+                  // notification.
+                  Item {
                     Layout.preferredWidth: Style.space(24)
                     Layout.preferredHeight: Style.space(24)
                     Layout.alignment: Qt.AlignTop
-                    radius: width / 2
-                    color: Color.accent
+                    readonly property bool hasIcon: String(row.model.icon || "") !== ""
 
-                    Text {
-                      anchors.centerIn: parent
-                      text: (String(row.model.appName || "?").replace(/^.*\./, "").charAt(0) || "?").toUpperCase()
-                      textFormat: Text.PlainText
-                      color: Color.popups.background
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.caption
-                      font.bold: true
+                    Image {
+                      anchors.fill: parent
+                      visible: parent.hasIcon
+                      source: parent.hasIcon ? ("file://" + row.model.icon) : ""
+                      fillMode: Image.PreserveAspectFit
+                      smooth: true
+                      mipmap: true
+                      asynchronous: true
+                    }
+
+                    Rectangle {
+                      anchors.fill: parent
+                      visible: !parent.hasIcon
+                      radius: width / 2
+                      color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.12)
+
+                      Text {
+                        anchors.centerIn: parent
+                        text: String.fromCharCode(0xf17b) // Android robot
+                        textFormat: Text.PlainText
+                        color: root.fg
+                        font.family: Style.font.family
+                        font.pixelSize: Style.font.body
+                      }
                     }
                   }
 
