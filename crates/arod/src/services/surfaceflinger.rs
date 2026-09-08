@@ -97,9 +97,13 @@ impl Service for ComposerAidl {
                 Ok(true)
             }
             "createDisplayEventConnection" => {
+                // AIDL order in this build: (VsyncSource vsyncSource, @nullable
+                // IBinder layerHandle, EventRegistration eventRegistration) — an
+                // earlier assumption of (source, registration, layer) mis-parsed
+                // the args and left Choreographer without a working vsync source.
                 let vsync_source = data.read_i32()?;
-                let registration = data.read_i32()?;
                 let _layer: Option<SIBinder> = data.read().unwrap_or(None);
+                let registration = data.read_i32().unwrap_or(0);
                 log::info!("sf: createDisplayEventConnection source={vsync_source} registration={registration:#x}");
                 let conn = DisplayEventConnection::new(self.sf.frame_interval_ns)?;
                 let binder = super::binder_of(conn);
@@ -469,6 +473,7 @@ impl Service for DisplayEventConnection {
     fn handle(&self, name: &str, _code: TransactionCode, data: &mut Parcel, reply: &mut Parcel) -> Result<bool> {
         match name {
             "stealReceiveChannel" => {
+                log::debug!("sf: DEC.stealReceiveChannel");
                 ap::no_exception(reply)?;
                 reply.write_i32(1)?; // out parcelable present
                 reply.write_raw_file_descriptor(self.receive.as_fd())?; // BitTube: receive fd
@@ -494,6 +499,7 @@ impl Service for DisplayEventConnection {
                 Ok(true)
             }
             "requestNextVsync" => {
+                log::debug!("sf: DEC.requestNextVsync");
                 let (send, counter, interval) = (self.send.clone(), self.counter.clone(), self.interval_ns);
                 std::thread::spawn(move || {
                     std::thread::sleep(std::time::Duration::from_nanos((interval / 2) as u64));
