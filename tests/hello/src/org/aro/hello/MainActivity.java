@@ -2,8 +2,10 @@ package org.aro.hello;
 
 import android.app.Activity;
 import android.app.Notification;
+import android.app.PendingIntent;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
+import android.net.Uri;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
@@ -73,12 +75,7 @@ public class MainActivity extends Activity {
                 tv.setText("Tapped " + taps);
                 NotificationManager nm = getSystemService(NotificationManager.class);
                 nm.createNotificationChannel(new NotificationChannel("taps", "Taps", NotificationManager.IMPORTANCE_DEFAULT));
-                Notification n = new Notification.Builder(MainActivity.this, "taps")
-                        .setSmallIcon(android.R.drawable.ic_dialog_info)
-                        .setContentTitle("Hello from ARO")
-                        .setContentText("Tapped " + taps + " time" + (taps == 1 ? "" : "s"))
-                        .build();
-                nm.notify(1, n);
+                postTapNotification(taps);
             }
         });
         setContentView(root);
@@ -142,6 +139,27 @@ public class MainActivity extends Activity {
         }
     }
 
+    // Post a notification whose contentIntent deep-links into SecondActivity, so
+    // tapping the host notification drives the ARO notification tap-back path.
+    private void postTapNotification(int n) {
+        NotificationManager nm = getSystemService(NotificationManager.class);
+        nm.createNotificationChannel(new NotificationChannel("taps", "Taps", NotificationManager.IMPORTANCE_DEFAULT));
+        Intent view = new Intent(Intent.ACTION_VIEW, Uri.parse("aro://notification-tap/" + n));
+        PendingIntent pi = PendingIntent.getActivity(this, 0, view, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        Notification note = new Notification.Builder(this, "taps")
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setContentTitle("Hello from ARO")
+                .setContentText("Notification " + n + " — tap to open")
+                .setContentIntent(pi)
+                .setAutoCancel(true)
+                .build();
+        nm.notify(1, note);
+    }
+
     @Override protected void onStart() { super.onStart(); Log.i(TAG, "onStart"); }
-    @Override protected void onResume() { super.onResume(); Log.i(TAG, "onResume"); }
+    @Override protected void onResume() {
+        super.onResume();
+        Log.i(TAG, "onResume");
+        postTapNotification(0); // post on launch so tap-back is testable without an in-app tap
+    }
 }

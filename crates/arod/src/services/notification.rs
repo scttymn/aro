@@ -5,11 +5,45 @@ use super::Service;
 use crate::aparcel as ap;
 use crate::bundle;
 use crate::notify::Notifier;
-use rsbinder::{Parcel, Result, TransactionCode};
+use crate::pending_intent::{Registry as PiRegistry, Target};
+use rsbinder::{Parcel, Result, SIBinder, TransactionCode};
 use std::sync::Arc;
 
 pub struct NotificationService {
     pub notifier: Option<Arc<Notifier>>,
+    pub pending_intents: Arc<PiRegistry>,
+}
+
+// flat_binder_object header type B_PACK_CHARS('s','b','*',0x85): a binder we published,
+// routed back to us as the loopback publisher (contentIntent's IIntentSender).
+const BINDER_TYPE_BINDER: i32 = 0x7362_2a85u32 as i32;
+
+/// Scan the Notification parcel's binder objects for one that matches a
+/// PendingIntent we minted, and return its launch target. The contentIntent's
+/// IIntentSender rides in the parcel as a binder object; reading it back gives
+/// the same SIBinder we handed out from getIntentSender.
+fn tap_target(data: &mut Parcel, reg: &PiRegistry) -> Option<Target> {
+    let (bytes, objs) = data.aro_debug_bytes();
+    let rd = |o: usize| -> i32 {
+        i32::from_le_bytes([bytes[o], bytes[o + 1], bytes[o + 2], bytes[o + 3]])
+    };
+    let save = data.data_position();
+    let mut found = None;
+    for &o in &objs {
+        let o = o as usize;
+        if o + 4 > bytes.len() || rd(o) != BINDER_TYPE_BINDER {
+            continue;
+        }
+        data.set_data_position(o);
+        if let Ok(Some(b)) = data.read::<Option<SIBinder>>() {
+            if let Some(t) = reg.target_for(&b) {
+                found = Some(t);
+                break;
+            }
+        }
+    }
+    data.set_data_position(save);
+    found
 }
 
 // Notification.FLAG_ONGOING_EVENT
@@ -57,9 +91,10 @@ impl Service for NotificationService {
                     (None, Some(s)) => s,
                     (None, None) => String::new(),
                 };
-                log::info!("notification: {pkg} tag={tag:?} id={id}: {summary:?} / {body:?}");
+                let target = tap_target(data, &self.pending_intents);
+                log::info!("notification: {pkg} tag={tag:?} id={id}: {summary:?} / {body:?} tap={target:?}");
                 if let Some(n) = &self.notifier {
-                    n.notify(&pkg, tag.as_deref(), id, &pkg, &summary, &body, 1, resident);
+                    n.notify(&pkg, tag.as_deref(), id, &pkg, &summary, &body, 1, resident, target);
                 }
                 ap::no_exception(reply)?;
                 Ok(true)

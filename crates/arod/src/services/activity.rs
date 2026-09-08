@@ -20,6 +20,8 @@ pub struct ActivityService {
     pub client_controller: Mutex<Option<SIBinder>>,
     /// Deep-link URI for the initial launch (arod app --url); ACTION_VIEW instead of MAIN.
     pub launch_url: std::sync::Mutex<Option<String>>,
+    /// PendingIntents minted via getIntentSender (for notification tap-back).
+    pub pending_intents: std::sync::Arc<crate::pending_intent::Registry>,
 }
 
 const BIND_APPLICATION: u32 = 6; // IApplicationThread.bindApplication (spec/transactions.rs)
@@ -282,6 +284,28 @@ impl ActivityService {
                         Err(e) => log::error!("activity: launch failed: {e:#}"),
                     });
                 }
+                Ok(true)
+            }
+            "getIntentSender" | "getIntentSenderWithFeature" => {
+                // (int type, String pkg, [String featureId], IBinder token, String resultWho,
+                //  int requestCode, Intent[] intents, String[] resolvedTypes, int flags, Bundle, int user)
+                let _type = data.read_i32()?;
+                let _pkg: Option<String> = data.read()?;
+                if name == "getIntentSenderWithFeature" {
+                    let _feature: Option<String> = data.read()?;
+                }
+                let _token: Option<SIBinder> = data.read()?;
+                let _result_who: Option<String> = data.read()?;
+                let _request_code = data.read_i32()?;
+                let count = data.read_i32()?;
+                let mut target = crate::pending_intent::Target::default();
+                if count >= 1 && data.read_i32()? != 0 {
+                    target = crate::pending_intent::read_intent_target(data)?; // first intent's target
+                }
+                log::info!("activity: getIntentSender -> {target:?}");
+                let sender = self.pending_intents.create(target);
+                ap::no_exception(reply)?;
+                reply.write(&Some(sender))?;
                 Ok(true)
             }
             "frozenBinderTransactionDetected" => Ok(true), // oneway

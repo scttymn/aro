@@ -3,6 +3,7 @@
 //! Creates the session namespaces, mounts the private binderfs, becomes the
 //! Binder context manager, hosts the native services, sinks Android logs,
 //! and launches app processes through `aro-exec`.
+mod pending_intent;
 mod aparcel;
 mod hub;
 mod parcelables;
@@ -113,7 +114,8 @@ fn main() -> Result<()> {
 
     // 3b. Services.
     let registry = std::sync::Arc::new(services::registry::Registry { apps: std::sync::Mutex::new(Vec::new()), display });
-    let activity = std::sync::Arc::new(services::activity::ActivityService { registry: registry.clone(), pending: std::sync::Mutex::new(None), attached: std::sync::Mutex::new(None), client_controller: std::sync::Mutex::new(None), launch_url: std::sync::Mutex::new(None) });
+    let pending_intents = pending_intent::Registry::new();
+    let activity = std::sync::Arc::new(services::activity::ActivityService { registry: registry.clone(), pending: std::sync::Mutex::new(None), attached: std::sync::Mutex::new(None), client_controller: std::sync::Mutex::new(None), launch_url: std::sync::Mutex::new(None), pending_intents: pending_intents.clone() });
     let controller = services::binder_of(services::activity_task::ActivityClientController);
     *activity.client_controller.lock().unwrap() = Some(controller.clone());
     services::publish(&hub_impl, "activity_task", services::activity_task::ActivityTaskService { client_controller: std::sync::Mutex::new(Some(controller)), activity: activity.clone() });
@@ -140,11 +142,17 @@ fn main() -> Result<()> {
     services::publish(&hub_impl, "input", services::input::InputService);
     services::publish(&hub_impl, "audio", services::audio::AudioService);
     // Notifications go to whatever owns org.freedesktop.Notifications on the session bus.
-    let notifier = match notify::Notifier::connect(session.host_uid) {
+    let fire_activity = activity.clone();
+    let fire: std::sync::Arc<dyn Fn(&pending_intent::Target) + Send + Sync> =
+        std::sync::Arc::new(move |t: &pending_intent::Target| {
+            log::info!("notify: tap -> {t:?}");
+            fire_activity.start_activity(t.package.clone(), t.class.clone(), t.action.clone(), t.data.clone());
+        });
+    let notifier = match notify::Notifier::connect(session.host_uid, fire) {
         Ok(n) => Some(std::sync::Arc::new(n)),
         Err(e) => { log::warn!("notify: no host notification service ({e}); notifications logged only"); None }
     };
-    services::publish(&hub_impl, "notification", services::notification::NotificationService { notifier });
+    services::publish(&hub_impl, "notification", services::notification::NotificationService { notifier, pending_intents: pending_intents.clone() });
     // Network: mirror the host's connection (NetworkManager on the system bus).
     if let Err(e) = dnsproxy::serve(&session.sockets) { log::warn!("dnsproxyd: {e}"); }
     let hostnet = hostnet::probe(session.host_uid);
