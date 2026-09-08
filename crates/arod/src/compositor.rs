@@ -7,6 +7,7 @@
 //! copied into a shared-memory pool the compositor reads.
 use crate::input_channel::{InputHub, ACTION_DOWN, ACTION_MOVE, ACTION_UP};
 use crate::services::allocator::Buffer;
+use crate::services::surfaceflinger::{release_buffer, PostedBuffer};
 use crate::services::window_session::WindowHost;
 use std::os::fd::{AsFd, AsRawFd, FromRawFd, OwnedFd};
 use std::sync::mpsc::{Receiver, Sender};
@@ -18,6 +19,7 @@ use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_ba
 /// A frame to present: which buffer, and its geometry.
 pub struct Frame {
     pub buffer: Arc<Buffer>,
+    pub posted: PostedBuffer,
 }
 
 /// What the host says about the display the app will be shown on. Nothing in
@@ -154,8 +156,10 @@ impl Presenter {
         Some(Presenter { tx })
     }
 
-    pub fn present(&self, buffer: Arc<Buffer>) {
-        let _ = self.tx.send(Frame { buffer });
+    pub fn present(&self, buffer: Arc<Buffer>, posted: PostedBuffer) {
+        if self.tx.send(Frame { buffer, posted: posted.clone() }).is_err() {
+            release_buffer(&posted); // presenter gone: don't strand the app's buffer
+        }
     }
 }
 
@@ -174,7 +178,7 @@ struct App {
     pool: Option<(wl_shm_pool::WlShmPool, OwnedFd, *mut u8, usize)>,
     wl_buffer: Option<wl_buffer::WlBuffer>,
     buffer_busy: bool,
-    pending: Option<Arc<Buffer>>,
+    pending: Option<Frame>,
     last_size: (u32, u32),
     // Input + window host (frame size follows the toplevel's configure).
     input: Arc<InputHub>,
@@ -254,11 +258,17 @@ fn run(conn: Connection, rx: Receiver<Frame>, app_id: String, title: String, inp
         }
         // Drain posts; keep only the freshest buffer.
         while let Ok(frame) = rx.try_recv() {
-            app.pending = Some(frame.buffer);
+            // Only the freshest frame is shown; a superseded one goes straight back.
+            if let Some(old) = app.pending.replace(frame) {
+                release_buffer(&old.posted);
+            }
         }
         if app.pending.is_some() && !app.buffer_busy {
-            if let Some(buf) = app.pending.take() {
+            if let Some(frame) = app.pending.take() {
+                let buf = frame.buffer.clone();
                 present_buffer(&mut app, &qh, &buf);
+                // The pixels are in our shm pool now; the app may reuse its buffer.
+                release_buffer(&frame.posted);
                 presents += 1;
                 // Debug: inject a tap at the window centre a moment after the
                 // first frame, to exercise input without a desktop pointer.
@@ -269,11 +279,11 @@ fn run(conn: Connection, rx: Receiver<Frame>, app_id: String, title: String, inp
             }
         }
         if let Some((cx, cy, at, down_sent)) = test_tap {
-            if !down_sent && at.elapsed() >= std::time::Duration::from_millis(500) {
+            if !down_sent && at.elapsed() >= std::time::Duration::from_millis(2000) {
                 log::info!("compositor: test tap DOWN at ({cx:.0},{cy:.0})");
                 app.input.send_motion(ACTION_DOWN, cx, cy);
                 test_tap = Some((cx, cy, at, true));
-            } else if down_sent && at.elapsed() >= std::time::Duration::from_millis(800) {
+            } else if down_sent && at.elapsed() >= std::time::Duration::from_millis(2300) {
                 log::info!("compositor: test tap UP at ({cx:.0},{cy:.0})");
                 app.input.send_motion(ACTION_UP, cx, cy);
                 test_tap = None;

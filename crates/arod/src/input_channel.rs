@@ -76,7 +76,10 @@ impl InputHub {
     /// the app's window coordinates. Returns false if there is no channel yet.
     pub fn send_motion(&self, action: i32, x: f32, y: f32) -> bool {
         let guard = self.fd.lock().unwrap();
-        let Some(fd) = guard.as_ref() else { return false };
+        let Some(fd) = guard.as_ref() else {
+            log::warn!("input: no input channel yet; dropping motion action={action}");
+            return false;
+        };
         let event_time = now_ns();
         if action == ACTION_DOWN {
             self.down_time.store(event_time, Ordering::SeqCst);

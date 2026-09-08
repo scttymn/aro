@@ -271,6 +271,12 @@ pub fn run(spec: &Spec, log: Option<&std::os::unix::net::UnixDatagram>) -> Resul
     match unsafe { fork() }.context("fork")? {
         ForkResult::Child => {
             drop(parent_sock);
+            // Die with aro-exec: the app is init of its own pid namespace, so nothing
+            // else reaps it if the supervisor goes away (SIGKILL included).
+            unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL) };
+            if unsafe { libc::getppid() } == 1 {
+                std::process::exit(0); // parent already gone between fork and prctl
+            }
             let code = match child(spec, &root, std::os::fd::IntoRawFd::into_raw_fd(child_sock)) {
                 Ok(()) => 0,
                 Err(e) => {

@@ -138,29 +138,93 @@ pub struct ComposerLegacy {
     pub presenter: Option<crate::compositor::Presenter>,
 }
 
-/// Scan a transaction parcel for our gralloc handle: the "AROB" magic int
-/// followed by w,h,stride,format,layers,usage(2),size,id(2). Returns
-/// (buffer_id, width, height) of the last match (the freshest buffer).
-fn scan_for_aro_buffer(data: &mut Parcel) -> Option<(u64, u32, u32)> {
+/// A buffer an app posted in setTransactionState, with what we need to give
+/// it back: BLASTBufferQueue keys releases by the GraphicBuffer's own id and
+/// frame number, through the per-buffer `releaseBufferListener` binder.
+#[derive(Clone)]
+pub struct PostedBuffer {
+    pub gralloc_id: u64,
+    pub width: u32,
+    pub height: u32,
+    pub gb_id: u64,
+    pub frame_number: u64,
+    pub release_listener: Option<SIBinder>,
+}
+
+const GB01: i32 = 0x4742_3031; // GraphicBuffer flatten magic 'GB01'
+const FLAT_OBJ: usize = 24; // sizeof(flat_binder_object)
+const GB_HEADER_INTS: usize = 13;
+
+/// Find the posted buffer in a transaction parcel. We locate our gralloc
+/// handle by its "AROB" magic and read the GraphicBuffer + BufferData around
+/// it (Parcel::write(Flattenable): [len][fdCount][data padded][fd objects]).
+fn parse_posted_buffer(data: &mut Parcel) -> Option<PostedBuffer> {
     let save = data.data_position();
-    let size = data.data_size();
-    data.set_data_position(0);
     let bytes = data.aro_debug_bytes().0;
-    data.set_data_position(save);
-    let _ = size;
+    let rd = |o: usize| -> i32 { i32::from_le_bytes([bytes[o], bytes[o + 1], bytes[o + 2], bytes[o + 3]]) };
     let magic = super::allocator::HANDLE_MAGIC.to_le_bytes();
     let mut found = None;
-    let mut i = 0usize;
+    let mut i = GB_HEADER_INTS * 4 + 8;
     while i + 44 <= bytes.len() {
         if bytes[i..i + 4] == magic {
-            let rd = |o: usize| u32::from_le_bytes([bytes[i + o], bytes[i + o + 1], bytes[i + o + 2], bytes[i + o + 3]]);
-            let (w, h) = (rd(4), rd(8));
-            let id = rd(36) as u64 | ((rd(40) as u64) << 32);
-            found = Some((id, w, h));
+            found = Some(i);
         }
         i += 4;
     }
-    found
+    let p = found?;
+    let h = p - GB_HEADER_INTS * 4; // GraphicBuffer flatten header
+    if rd(h) != GB01 {
+        log::warn!("sf: AROB handle without GB01 header ({:#x})", rd(h));
+        return None;
+    }
+    let (w, hgt) = (rd(h + 4) as u32, rd(h + 8) as u32);
+    let gb_id = ((rd(h + 28) as u32 as u64) << 32) | rd(h + 32) as u32 as u64;
+    let num_fds = rd(h + 40) as usize;
+    let num_ints = rd(h + 44) as usize;
+    let gralloc_id = rd(p + 36) as u32 as u64 | ((rd(p + 40) as u32 as u64) << 32);
+    // Flattenable framing: [len][fdCount] precede `h`; data is padded to 4, then fdCount objects.
+    let len = rd(h - 8) as usize;
+    let fd_count = rd(h - 4) as usize;
+    if len != (GB_HEADER_INTS + num_ints) * 4 || fd_count != num_fds {
+        log::warn!("sf: GraphicBuffer framing mismatch len={len} fds={fd_count} (ints={num_ints} numFds={num_fds})");
+    }
+    let mut pos = h + ((len + 3) & !3) + fd_count * FLAT_OBJ;
+    // BufferData continues: bool acquireFence [+ Flattenable], u64 frameNumber, binder releaseBufferListener.
+    data.set_data_position(pos);
+    let has_fence = data.read_i32().ok()? != 0;
+    if has_fence {
+        let flen = data.read_i32().ok()? as usize;
+        let ffds = data.read_i32().ok()? as usize;
+        pos = data.data_position() + ((flen + 3) & !3) + ffds * FLAT_OBJ;
+        data.set_data_position(pos);
+    }
+    let frame_number = data.read_u64().ok()?;
+    let release_listener: Option<SIBinder> = data.read().ok().flatten();
+    data.set_data_position(save);
+    Some(PostedBuffer { gralloc_id, width: w, height: hgt, gb_id, frame_number, release_listener })
+}
+
+/// ITransactionCompletedListener.onReleaseBuffer(ReleaseCallbackId, Fence, maxAcquiredBufferCount), oneway.
+pub fn release_buffer(pb: &PostedBuffer) {
+    let Some(listener) = &pb.release_listener else { return };
+    let r = (|| -> anyhow::Result<()> {
+        let proxy = listener.as_proxy().ok_or_else(|| anyhow::anyhow!("release listener is not a proxy"))?;
+        let mut d = proxy.prepare_transact(true)?;
+        d.write_i32(1)?; // writeParcelable: non-null
+        d.write_u64(pb.gb_id)?; // ReleaseCallbackId.bufferId
+        d.write_u64(pb.frame_number)?; // ReleaseCallbackId.framenumber
+        // Fence (Flattenable): len 4, no fds, numFds 0 == NO_FENCE
+        d.write_i32(4)?;
+        d.write_i32(0)?;
+        d.write_u32(0)?;
+        d.write_u32(1)?; // currentMaxAcquiredBufferCount
+        proxy.submit_transact(2, &d, rsbinder::FLAG_ONEWAY)?; // ON_RELEASE_BUFFER
+        Ok(())
+    })();
+    match r {
+        Ok(()) => log::debug!("sf: released buffer gb={:#x} frame={}", pb.gb_id, pb.frame_number),
+        Err(e) => log::warn!("sf: onReleaseBuffer failed: {e}"),
+    }
 }
 
 impl Service for ComposerLegacy {
@@ -174,10 +238,11 @@ impl Service for ComposerLegacy {
                 // The posted buffer is a flattened GraphicBuffer; its ARO native handle
                 // carries "AROB" magic + our buffer id, which we scan for rather than
                 // parsing the whole layer_state_t.
-                if let Some((id, w, h)) = scan_for_aro_buffer(data) {
-                    log::info!("sf: setTransactionState #{n} posts ARO buffer {id} ({w}x{h})");
-                    if let (Some(p), Some(buf)) = (&self.presenter, self.gralloc.buffers.lock().unwrap().get(&id).cloned()) {
-                        p.present(buf);
+                if let Some(pb) = parse_posted_buffer(data) {
+                    log::info!("sf: setTransactionState #{n} posts ARO buffer {} ({}x{}) gb={:#x} frame={} release={}", pb.gralloc_id, pb.width, pb.height, pb.gb_id, pb.frame_number, pb.release_listener.is_some());
+                    match (&self.presenter, self.gralloc.buffers.lock().unwrap().get(&pb.gralloc_id).cloned()) {
+                        (Some(p), Some(buf)) => p.present(buf, pb),
+                        _ => release_buffer(&pb), // nothing to show it on: hand it straight back
                     }
                 } else {
                     log::debug!("sf: setTransactionState #{n} ({} bytes, no buffer)", data.data_size());

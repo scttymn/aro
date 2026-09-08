@@ -52,6 +52,9 @@ impl WindowHost {
     /// The desktop resized our toplevel (logical pixels): adopt the physical
     /// size and tell every app window to relayout at it (IWindow.resized, oneway).
     pub fn resize(&self, w: i32, h: i32) {
+        if std::env::var_os("ARO_NO_RESIZE").is_some() {
+            return; // debug: keep the first frame size, never push resized()
+        }
         let (w, h) = (w * self.scale, h * self.scale);
         {
             let mut s = self.size.lock().unwrap();

@@ -42,6 +42,10 @@ enum Cmd {
 }
 
 fn main() -> Result<()> {
+    // Launched by arod (session env present): die with it so app namespaces never outlive the session.
+    if ns::Session::from_env().is_some() {
+        unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL) };
+    }
     let cli = Cli::parse();
     let layout = Layout::default();
     if !layout.system.join("system/bin/app_process64").exists() {
