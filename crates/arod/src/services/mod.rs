@@ -17,6 +17,8 @@ pub mod display;
 pub mod input;
 pub mod input_codes;
 pub mod input_method;
+pub mod network;
+pub mod network_codes;
 pub mod notification;
 pub mod notification_codes;
 pub mod package;

@@ -4,6 +4,13 @@ import android.app.Activity;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
+import android.net.NetworkInfo;
+import java.io.InputStream;
+import java.net.URL;
+import javax.net.ssl.HttpsURLConnection;
 import android.content.Context;
 import android.graphics.Color;
 import android.os.Bundle;
@@ -65,6 +72,41 @@ public class MainActivity extends Activity {
             }
         });
         setContentView(root);
+        probeNetwork();
+    }
+
+    private void probeNetwork() {
+        ConnectivityManager cm = getSystemService(ConnectivityManager.class);
+        Network active = cm.getActiveNetwork();
+        NetworkCapabilities nc = active == null ? null : cm.getNetworkCapabilities(active);
+        NetworkInfo ni = cm.getActiveNetworkInfo();
+        Log.i(TAG, "net: activeNetwork=" + active
+                + " internet=" + (nc != null && nc.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET))
+                + " validated=" + (nc != null && nc.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED))
+                + " wifi=" + (nc != null && nc.hasTransport(NetworkCapabilities.TRANSPORT_WIFI))
+                + " info=" + (ni == null ? "null" : ni.getTypeName() + "/" + ni.getState()));
+        new Thread(new Runnable() {
+            @Override public void run() {
+                httpGet("https://1.1.1.1/");        // literal IP: socket + TLS, no DNS
+                httpGet("https://example.com/");    // hostname: needs DNS
+            }
+        }).start();
+    }
+
+    private void httpGet(String url) {
+        try {
+            HttpsURLConnection c = (HttpsURLConnection) new URL(url).openConnection();
+            c.setConnectTimeout(5000);
+            c.setReadTimeout(5000);
+            int code = c.getResponseCode();
+            InputStream in = c.getInputStream();
+            int n = 0, b;
+            while ((b = in.read()) != -1 && n < 64) n++;
+            in.close();
+            Log.i(TAG, "http " + url + " -> " + code + " (" + n + "+ bytes)");
+        } catch (Exception e) {
+            Log.w(TAG, "http " + url + " failed: " + e);
+        }
     }
 
     @Override protected void onStart() { super.onStart(); Log.i(TAG, "onStart"); }

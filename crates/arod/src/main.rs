@@ -12,6 +12,8 @@ mod shm;
 
 use anyhow::{bail, Context, Result};
 mod bundle;
+mod dnsproxy;
+mod hostnet;
 mod compositor;
 mod notify;
 mod input_channel;
@@ -131,6 +133,10 @@ fn main() -> Result<()> {
         Err(e) => { log::warn!("notify: no host notification service ({e}); notifications logged only"); None }
     };
     services::publish(&hub_impl, "notification", services::notification::NotificationService { notifier });
+    // Network: mirror the host's connection (NetworkManager on the system bus).
+    if let Err(e) = dnsproxy::serve(&session.sockets) { log::warn!("dnsproxyd: {e}"); }
+    let hostnet = hostnet::probe(session.host_uid);
+    services::publish(&hub_impl, "connectivity", services::network::NetworkService { net: hostnet.clone() });
     // The allocator is a VINTF-stable HAL binder; the mapper half is a bionic
     // library bound into the app at /vendor/lib64/hw/mapper.aro.so.
     hub_impl.register("android.hardware.graphics.allocator.IAllocator/default", services::vintf_binder_of(services::allocator::AllocatorService { gralloc: gralloc.clone() }));
@@ -145,7 +151,11 @@ fn main() -> Result<()> {
     services::publish(&hub_impl, "activity", services::activity::ActivityRef(activity.clone()));
 
     // Properties are cheap to regenerate and ARO's extra ones evolve with the runtime.
-    let n = prepare::write_properties(&layout.system, &layout.state)?;
+    let mut extra_props: Vec<(String, String)> = Vec::new();
+    for (i, dns) in hostnet.dns.iter().enumerate() {
+        extra_props.push((format!("net.dns{}", i + 1), dns.to_string()));
+    }
+    let n = prepare::write_properties(&layout.system, &layout.state, &extra_props)?;
     log::info!("arod: {n} system properties");
 
     // 4. Launch.

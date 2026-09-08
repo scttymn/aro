@@ -19,7 +19,7 @@ Full detail and exit criteria are in [docs/MILESTONES.md](docs/MILESTONES.md).
 | M1 Runtime | ART (`app_process64`) runs code from an unmodified APK in a user namespace, no root | ✅ done |
 | M2 Bus + Activity | Private binder bus, package/activity services; a real `ActivityThread` lifecycle reaches `onResume` | ✅ done |
 | M3 Display | Window session, composer, gralloc (allocator + `mapper.aro.so`), Wayland presenter; app draws into a Hyprland window, follows the tiled size, receives clicks | ✅ done |
-| M4 Host capabilities | Notifications → freedesktop ✅ · Audio → PipeWire · Network → NetworkManager · Storage → home dir + SAF · Location → GeoClue · Intent dispatcher, `PendingIntent`, deep links (`aro open <uri>`) | 🚧 in progress |
+| M4 Host capabilities | Notifications → freedesktop ✅ · Network → NetworkManager + host DNS ✅ · Audio → PipeWire · Storage → home dir + SAF · Location → GeoClue · Intent dispatcher, `PendingIntent`, deep links (`aro open <uri>`) | 🚧 in progress |
 | M5 Accounts + GMS | Accounts on libsecret; Play Services / Play Store as tenant apps; integrity outcome documented | ⏳ planned |
 | M6 Sandbox | Per-app user namespace, seccomp, Landlock from declared permissions; services enforce grants | ⏳ planned |
 | M7 ARM native libs | In-process arm64 translator so arm64-only APKs run | ⏳ planned |
@@ -27,6 +27,8 @@ Full detail and exit criteria are in [docs/MILESTONES.md](docs/MILESTONES.md).
 **Today:** `arod app some.apk` launches an app as a native process and shows it
 in a Hyprland window that follows your tiling and display scale, takes clicks,
 and keeps rendering (buffers are recycled through the app's release channel,
-as SurfaceFlinger does). Rendering is software: the GSI has no GPU driver path yet.
+as SurfaceFlinger does). Apps reach the network — an HTTPS request works and
+`ConnectivityManager` reports the desktop's connection. Rendering is software:
+the GSI has no GPU driver path yet.
 
 Rust toolchain is managed by mise (`.mise.toml`); `cargo build` from the repo root.

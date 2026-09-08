@@ -99,7 +99,7 @@ pub fn write_aconfig(system: &Path, state: &Path) -> Result<usize> {
 
 /// System properties: the image's build.prop plus what a device's vendor
 /// partition would normally provide.
-pub fn write_properties(system: &Path, state: &Path) -> Result<usize> {
+pub fn write_properties(system: &Path, state: &Path, extra: &[(String, String)]) -> Result<usize> {
     let mut props = Vec::new();
     let build_prop = std::fs::read_to_string(system.join("system/build.prop")).context("reading system/build.prop")?;
     props.extend(aro_props::parse_prop_file(&build_prop));
@@ -140,6 +140,7 @@ pub fn write_properties(system: &Path, state: &Path) -> Result<usize> {
     ] {
         props.push((k.to_string(), v.to_string()));
     }
+    props.extend(extra.iter().cloned());
     // Later entries (ARO extras) override earlier ones (build.prop).
     let mut deduped: Vec<(String, String)> = Vec::new();
     for (k, v) in props.into_iter() {
@@ -165,7 +166,7 @@ pub fn prepare(layout: &Layout) -> Result<()> {
     eprintln!("aro-exec: {n} APEX modules listed");
     let n = write_aconfig(&layout.system, &layout.state)?;
     eprintln!("aro-exec: {n} aconfig containers");
-    let n = write_properties(&layout.system, &layout.state)?;
+    let n = write_properties(&layout.system, &layout.state, &[])?;
     eprintln!("aro-exec: {n} system properties");
     Ok(())
 }
