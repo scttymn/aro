@@ -81,22 +81,12 @@ pub struct ActivityRef(pub std::sync::Arc<ActivityService>);
 
 impl ActivityService {
     /// IApplicationThread.scheduleTransaction with LaunchActivityItem + ResumeActivityItem.
-    fn launch_activity(thread: &SIBinder, spec: &AppSpec, controller: &SIBinder, display: (i32, i32, i32)) -> anyhow::Result<()> {
-        use crate::parcelables::{Intent, LaunchTransaction, Rect, FLAG_ACTIVITY_NEW_TASK};
-        let Some(activity) = spec.main_activity.clone() else {
-            anyhow::bail!("no main activity known for {}", spec.package)
-        };
+    fn launch_activity(thread: &SIBinder, spec: &AppSpec, controller: &SIBinder, display: (i32, i32, i32), activity: &str, intent: crate::parcelables::Intent) -> anyhow::Result<()> {
+        use crate::parcelables::{LaunchTransaction, Rect};
         let proxy = thread.as_proxy().ok_or_else(|| anyhow::anyhow!("IApplicationThread is not a proxy"))?;
         let (w, h, dpi) = display;
         let config = Configuration::desktop(w, h, dpi);
-        let intent = Intent {
-            action: Some("android.intent.action.MAIN".into()),
-            package: None,
-            component: Some((spec.package.clone(), activity.clone())),
-            categories: vec!["android.intent.category.LAUNCHER".into()],
-            flags: FLAG_ACTIVITY_NEW_TASK,
-        };
-        let info = Registry::activity_info(spec, &activity).ok_or_else(|| anyhow::anyhow!("activity {activity} not declared in manifest"))?;
+        let info = Registry::activity_info(spec, activity).ok_or_else(|| anyhow::anyhow!("activity {activity} not declared in manifest"))?;
         let activity_token = super::token::new_token("activity");
         let assist_token = super::token::new_token("assist");
         let shareable_token = super::token::new_token("shareable");
@@ -130,6 +120,50 @@ impl Service for ActivityRef {
 }
 
 impl ActivityService {
+    /// Dispatch a startActivity: resolve the target and launch it into the
+    /// running app. Explicit (component set) same-app intents only for now.
+    pub fn start_activity(&self, pkg: Option<String>, class: Option<String>, action: Option<String>) {
+        let attached = self.attached.lock().unwrap().clone();
+        let controller = self.client_controller.lock().unwrap().clone();
+        let display = self.registry.display;
+        let (Some((thread, spec)), Some(controller)) = (attached, controller) else {
+            log::warn!("activity: startActivity with no running app");
+            return;
+        };
+        let target = match (pkg.as_deref(), class) {
+            (Some(p), Some(c)) if p == spec.package => c,
+            (Some(p), Some(_)) => {
+                log::warn!("activity: startActivity to another package {p:?} not supported yet");
+                return;
+            }
+            _ => {
+                // Implicit intent: resolve against this app's launcher for now.
+                log::warn!("activity: implicit startActivity (action={action:?}) — resolving to main activity");
+                match spec.main_activity.clone() {
+                    Some(m) => m,
+                    None => return,
+                }
+            }
+        };
+        if !spec.activities.iter().any(|a| a.name == target) {
+            log::warn!("activity: startActivity target {target} not declared");
+            return;
+        }
+        let intent = crate::parcelables::Intent {
+            action,
+            package: None,
+            component: Some((spec.package.clone(), target.clone())),
+            categories: vec![],
+            flags: crate::parcelables::FLAG_ACTIVITY_NEW_TASK,
+        };
+        log::info!("activity: startActivity -> {}/{target}", spec.package);
+        std::thread::spawn(move || {
+            if let Err(e) = Self::launch_activity(&thread, &spec, &controller, display, &target, intent) {
+                log::error!("activity: startActivity launch failed: {e:#}");
+            }
+        });
+    }
+
     fn handle(&self, name: &str, _code: TransactionCode, data: &mut Parcel, reply: &mut Parcel) -> Result<bool> {
         match name {
             "attachApplication" => {
@@ -162,7 +196,18 @@ impl ActivityService {
                 let controller = self.client_controller.lock().unwrap().clone();
                 let display = self.registry.display;
                 if let (Some((thread, spec)), Some(controller)) = (attached, controller) {
-                    std::thread::spawn(move || match Self::launch_activity(&thread, &spec, &controller, display) {
+                    let Some(main) = spec.main_activity.clone() else {
+                        log::error!("activity: no main activity for {}", spec.package);
+                        return Ok(true);
+                    };
+                    let intent = crate::parcelables::Intent {
+                        action: Some("android.intent.action.MAIN".into()),
+                        package: None,
+                        component: Some((spec.package.clone(), main.clone())),
+                        categories: vec!["android.intent.category.LAUNCHER".into()],
+                        flags: crate::parcelables::FLAG_ACTIVITY_NEW_TASK,
+                    };
+                    std::thread::spawn(move || match Self::launch_activity(&thread, &spec, &controller, display, &main, intent) {
                         Ok(()) => log::info!("activity: launch transaction sent for {}", spec.package),
                         Err(e) => log::error!("activity: launch failed: {e:#}"),
                     });

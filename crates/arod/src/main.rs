@@ -104,7 +104,7 @@ fn main() -> Result<()> {
     let activity = std::sync::Arc::new(services::activity::ActivityService { registry: registry.clone(), pending: std::sync::Mutex::new(None), attached: std::sync::Mutex::new(None), client_controller: std::sync::Mutex::new(None) });
     let controller = services::binder_of(services::activity_task::ActivityClientController);
     *activity.client_controller.lock().unwrap() = Some(controller.clone());
-    services::publish(&hub_impl, "activity_task", services::activity_task::ActivityTaskService { client_controller: std::sync::Mutex::new(Some(controller)) });
+    services::publish(&hub_impl, "activity_task", services::activity_task::ActivityTaskService { client_controller: std::sync::Mutex::new(Some(controller)), activity: activity.clone() });
     // Gralloc (allocator + mapper) — created early so the composer can resolve
     // posted buffers to their memfds for the Wayland presenter.
     let gralloc = std::sync::Arc::new(services::allocator::Gralloc::default());

@@ -19,7 +19,7 @@ Full detail and exit criteria are in [docs/MILESTONES.md](docs/MILESTONES.md).
 | M1 Runtime | ART (`app_process64`) runs code from an unmodified APK in a user namespace, no root | ✅ done |
 | M2 Bus + Activity | Private binder bus, package/activity services; a real `ActivityThread` lifecycle reaches `onResume` | ✅ done |
 | M3 Display | Window session, composer, gralloc (allocator + `mapper.aro.so`), Wayland presenter; app draws into a Hyprland window, follows the tiled size, receives clicks | ✅ done |
-| M4 Host capabilities | Notifications → freedesktop ✅ · Network → NetworkManager + host DNS ✅ · Storage → home dir ✅ (SAF picker pending intents) · Audio → PipeWire · Location → GeoClue · Intent dispatcher, `PendingIntent`, deep links (`aro open <uri>`) | 🚧 in progress |
+| M4 Host capabilities | Notifications → freedesktop ✅ · Network → NetworkManager + host DNS ✅ · Storage → home dir ✅ (SAF picker pending intents) · Audio → PipeWire · Location → GeoClue · Intent dispatcher ✅ (explicit; implicit/PendingIntent/deep-links next) | 🚧 in progress |
 | M5 Accounts + GMS | Accounts on libsecret; Play Services / Play Store as tenant apps; integrity outcome documented | ⏳ planned |
 | M6 Sandbox | Per-app user namespace, seccomp, Landlock from declared permissions; services enforce grants | ⏳ planned |
 | M7 ARM native libs | In-process arm64 translator so arm64-only APKs run | ⏳ planned |

@@ -7,17 +7,45 @@ use std::sync::Mutex;
 
 pub struct ActivityTaskService {
     pub client_controller: Mutex<Option<SIBinder>>,
+    pub activity: std::sync::Arc<super::activity::ActivityService>,
 }
 
 impl Service for ActivityTaskService {
     const DESCRIPTOR: &'static str = "android.app.IActivityTaskManager";
     const TABLE: &'static [(u32, &'static str)] = codes::IACTIVITYTASKMANAGER;
 
-    fn handle(&self, name: &str, _code: TransactionCode, _data: &mut Parcel, reply: &mut Parcel) -> Result<bool> {
+    fn handle(&self, name: &str, _code: TransactionCode, data: &mut Parcel, reply: &mut Parcel) -> Result<bool> {
         match name {
             "getActivityClientController" => {
                 ap::no_exception(reply)?;
                 reply.write(&self.client_controller.lock().unwrap().clone())?;
+                Ok(true)
+            }
+            "startActivity" | "startActivityWithFeature" => {
+                // (IApplicationThread caller, String callingPackage, String callingFeatureId,
+                //  Intent intent, String resolvedType, IBinder resultTo, ...)
+                let _caller: Option<SIBinder> = data.read()?;
+                let _calling_pkg: Option<String> = data.read()?; // String16
+                let _feature: Option<String> = data.read()?;     // String16
+                if data.read_i32()? != 0 {
+                    // Intent body (see android.content.Intent.writeToParcel).
+                    let action = ap::read_string8(data)?;
+                    let uri_type = data.read_i32()?; // Uri.writeToParcel: 0 == null
+                    if uri_type == 0 {
+                        let _type = ap::read_string8(data)?;
+                        let _ident = ap::read_string8(data)?;
+                        let _flags = data.read_i32()?;
+                        let _ext_flags = data.read_i32()?;
+                        let intent_pkg = ap::read_string8(data)?;
+                        let comp_pkg: Option<String> = data.read()?; // ComponentName: String16 package
+                        let comp_cls: Option<String> = if comp_pkg.is_some() { data.read()? } else { None };
+                        self.activity.start_activity(comp_pkg.or(intent_pkg), comp_cls, action);
+                    } else {
+                        log::warn!("activity_task: startActivity with data URI (type {uri_type}) not resolved yet");
+                    }
+                }
+                ap::no_exception(reply)?;
+                reply.write_i32(0)?; // START_SUCCESS
                 Ok(true)
             }
             "supportsMultiWindow" | "supportsSplitScreenMultiWindow" | "supportsLocalVoiceInteraction" => {

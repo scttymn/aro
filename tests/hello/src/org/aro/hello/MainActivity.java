@@ -17,6 +17,7 @@ import java.io.FileWriter;
 import java.io.BufferedReader;
 import java.io.FileReader;
 import android.content.Context;
+import android.content.Intent;
 import android.graphics.Color;
 import android.os.Bundle;
 import android.util.Log;
@@ -63,7 +64,8 @@ public class MainActivity extends Activity {
         root.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 taps++;
-                Log.i(TAG, "click " + taps);
+                Log.i(TAG, "click " + taps + " -> startActivity(SecondActivity)");
+                startActivity(new Intent(MainActivity.this, SecondActivity.class));
                 root.setBackgroundColor(colors[taps % colors.length]);
                 tv.setText("Tapped " + taps);
                 NotificationManager nm = getSystemService(NotificationManager.class);
