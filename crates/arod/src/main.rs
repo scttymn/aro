@@ -15,6 +15,7 @@ use anyhow::{bail, Context, Result};
 mod bundle;
 mod dnsproxy;
 mod hostnet;
+mod shade;
 mod compositor;
 mod notify;
 mod input_channel;
@@ -148,11 +149,21 @@ fn main() -> Result<()> {
             log::info!("notify: tap -> {t:?}");
             fire_activity.start_activity(t.package.clone(), t.class.clone(), t.action.clone(), t.data.clone());
         });
-    let notifier = match notify::Notifier::connect(session.host_uid, fire) {
+    let notifier = match notify::Notifier::connect(session.host_uid, fire.clone()) {
         Ok(n) => Some(std::sync::Arc::new(n)),
         Err(e) => { log::warn!("notify: no host notification service ({e}); notifications logged only"); None }
     };
-    services::publish(&hub_impl, "notification", services::notification::NotificationService { notifier, pending_intents: pending_intents.clone() });
+    // The ARO shade: a persistent, Android-style notification list served to the
+    // companion Omarchy widget over a Unix socket. Taps ride the same dispatch.
+    let shade = shade::Shade::new(fire);
+    if let Err(e) = shade.serve(&layout.runtime.join("notifications.sock")) {
+        log::warn!("shade: not serving ({e}); companion widget will be empty");
+    }
+    if let Some(n) = &notifier {
+        let n = n.clone();
+        shade.set_close_host(std::sync::Arc::new(move |pkg, tag, id| n.close(pkg, tag, id)));
+    }
+    services::publish(&hub_impl, "notification", services::notification::NotificationService { notifier, pending_intents: pending_intents.clone(), shade: shade.clone() });
     // Network: mirror the host's connection (NetworkManager on the system bus).
     if let Err(e) = dnsproxy::serve(&session.sockets) { log::warn!("dnsproxyd: {e}"); }
     let hostnet = hostnet::probe(session.host_uid);

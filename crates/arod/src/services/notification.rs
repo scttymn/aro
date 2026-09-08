@@ -12,6 +12,7 @@ use std::sync::Arc;
 pub struct NotificationService {
     pub notifier: Option<Arc<Notifier>>,
     pub pending_intents: Arc<PiRegistry>,
+    pub shade: Arc<crate::shade::Shade>,
 }
 
 // flat_binder_object header type B_PACK_CHARS('s','b','*',0x85): a binder we published,
@@ -94,8 +95,12 @@ impl Service for NotificationService {
                 let target = tap_target(data, &self.pending_intents);
                 log::info!("notification: {pkg} tag={tag:?} id={id}: {summary:?} / {body:?} tap={target:?}");
                 if let Some(n) = &self.notifier {
-                    n.notify(&pkg, tag.as_deref(), id, &pkg, &summary, &body, 1, resident, target);
+                    n.notify(&pkg, tag.as_deref(), id, &pkg, &summary, &body, 1, resident, target.clone());
                 }
+                // The shade keeps the notification after the toast fades. ongoing
+                // detection (Notification.flags) is not wired yet — see shade.rs.
+                let key = (pkg.clone(), tag.clone(), id);
+                self.shade.post(key, &pkg, &pkg, &summary, &body, resident, target);
                 ap::no_exception(reply)?;
                 Ok(true)
             }
@@ -105,12 +110,14 @@ impl Service for NotificationService {
                 let tag = read_string16(data)?;
                 let id = data.read_i32()?;
                 if let Some(n) = &self.notifier { n.close(&pkg, tag.as_deref(), id); }
+                self.shade.remove(&(pkg.clone(), tag.clone(), id));
                 ap::no_exception(reply)?;
                 Ok(true)
             }
             "cancelAllNotifications" => {
                 let pkg = read_string16(data)?.unwrap_or_default();
                 if let Some(n) = &self.notifier { n.close_all(&pkg); }
+                self.shade.remove_all(&pkg);
                 ap::no_exception(reply)?;
                 Ok(true)
             }

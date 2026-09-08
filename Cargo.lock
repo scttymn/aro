@@ -175,6 +175,8 @@ dependencies = [
  "log",
  "nix",
  "rsbinder",
+ "serde",
+ "serde_json",
  "wayland-client",
  "wayland-protocols",
  "zbus",

@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "aro.notifications",
+  "name": "ARO Notifications",
+  "version": "1.0.0",
+  "author": "ARO",
+  "description": "Android notification shade for ARO apps",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "ARO Notifications",
+    "description": "A pull-down shade of your Android apps' notifications",
+    "category": "Status",
+    "allowMultiple": false
+  }
+}
