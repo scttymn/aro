@@ -426,6 +426,7 @@ pub fn write_component_name(p: &mut Parcel, package: Option<&str>, class: Option
 #[derive(Clone, Debug, Default)]
 pub struct Intent {
     pub action: Option<String>,
+    pub data: Option<String>,
     pub package: Option<String>,
     pub component: Option<(String, String)>,
     pub categories: Vec<String>,
@@ -437,7 +438,13 @@ pub const FLAG_ACTIVITY_NEW_TASK: i32 = 0x1000_0000;
 impl Intent {
     pub fn write(&self, p: &mut Parcel) -> Result<()> {
         ap::string8(p, self.action.as_deref())?; // mAction
-        p.write_i32(0)?; // Uri.writeToParcel(null): NULL_TYPE_ID
+        match self.data.as_deref() {
+            Some(uri) => {
+                p.write_i32(1)?; // Uri StringUri TYPE_ID
+                ap::string8(p, Some(uri))?; // uriString
+            }
+            None => p.write_i32(0)?, // Uri.writeToParcel(null): NULL_TYPE_ID
+        }
         ap::string8(p, None)?; // mType
         ap::string8(p, None)?; // mIdentifier
         p.write_i32(self.flags)?; // mFlags

@@ -16,6 +16,12 @@
                 <action android:name="org.aro.hello.action.SHOW" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="aro" />
+            </intent-filter>
         </activity>
     </application>
 </manifest>

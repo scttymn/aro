@@ -18,6 +18,8 @@ pub struct ActivityService {
     pub attached: Mutex<Option<(SIBinder, AppSpec)>>,
     /// IActivityClientController binder handed to launched activities.
     pub client_controller: Mutex<Option<SIBinder>>,
+    /// Deep-link URI for the initial launch (arod app --url); ACTION_VIEW instead of MAIN.
+    pub launch_url: std::sync::Mutex<Option<String>>,
 }
 
 const BIND_APPLICATION: u32 = 6; // IApplicationThread.bindApplication (spec/transactions.rs)
@@ -119,10 +121,39 @@ impl Service for ActivityRef {
     }
 }
 
+/// A MAIN/LAUNCHER intent for the app's entry activity.
+fn main_intent(package: &str, activity: &str) -> crate::parcelables::Intent {
+    crate::parcelables::Intent {
+        action: Some("android.intent.action.MAIN".into()),
+        data: None,
+        package: None,
+        component: Some((package.to_string(), activity.to_string())),
+        categories: vec!["android.intent.category.LAUNCHER".into()],
+        flags: crate::parcelables::FLAG_ACTIVITY_NEW_TASK,
+    }
+}
+
+/// The scheme of a URI string (the part before the first ':').
+pub fn uri_scheme(uri: &str) -> Option<String> {
+    uri.split_once(':').map(|(s, _)| s.to_ascii_lowercase())
+}
+
 impl ActivityService {
+    /// Resolve an implicit VIEW-style intent against a spec's activities.
+    pub fn resolve(spec: &AppSpec, action: &str, data: Option<&str>) -> Option<String> {
+        let scheme = data.and_then(uri_scheme);
+        spec.activities.iter().find(|a| {
+            a.filters.iter().any(|f| {
+                f.actions.iter().any(|x| x == action)
+                    && f.categories.iter().any(|c| c == "android.intent.category.DEFAULT")
+                    && match &scheme { Some(s) => f.schemes.iter().any(|fs| fs == s), None => true }
+            })
+        }).map(|a| a.name.clone())
+    }
+
     /// Dispatch a startActivity: resolve the target and launch it into the
     /// running app. Explicit (component set) same-app intents only for now.
-    pub fn start_activity(&self, pkg: Option<String>, class: Option<String>, action: Option<String>) {
+    pub fn start_activity(&self, pkg: Option<String>, class: Option<String>, action: Option<String>, data: Option<String>) {
         let attached = self.attached.lock().unwrap().clone();
         let controller = self.client_controller.lock().unwrap().clone();
         let display = self.registry.display;
@@ -143,10 +174,15 @@ impl ActivityService {
                     log::warn!("activity: implicit startActivity with no action");
                     return;
                 };
+                let scheme = data.as_deref().and_then(uri_scheme);
                 let matched = spec.activities.iter().find(|a| {
                     a.filters.iter().any(|f| {
                         f.actions.iter().any(|x| x == act)
                             && f.categories.iter().any(|c| c == "android.intent.category.DEFAULT")
+                            && match &scheme {
+                                Some(s) => f.schemes.iter().any(|fs| fs == s),
+                                None => true,
+                            }
                     })
                 });
                 match matched {
@@ -167,6 +203,7 @@ impl ActivityService {
         }
         let intent = crate::parcelables::Intent {
             action,
+            data,
             package: None,
             component: Some((spec.package.clone(), target.clone())),
             categories: vec![],
@@ -212,18 +249,35 @@ impl ActivityService {
                 let controller = self.client_controller.lock().unwrap().clone();
                 let display = self.registry.display;
                 if let (Some((thread, spec)), Some(controller)) = (attached, controller) {
-                    let Some(main) = spec.main_activity.clone() else {
-                        log::error!("activity: no main activity for {}", spec.package);
-                        return Ok(true);
+                    let url = self.launch_url.lock().unwrap().clone();
+                    let (target, intent) = if let Some(uri) = url {
+                        // Deep link: ACTION_VIEW resolved against the app's intent-filters.
+                        match Self::resolve(&spec, "android.intent.action.VIEW", Some(&uri)) {
+                            Some(cls) => {
+                                log::info!("activity: deep link {uri:?} -> {cls}");
+                                (cls.clone(), crate::parcelables::Intent {
+                                    action: Some("android.intent.action.VIEW".into()),
+                                    data: Some(uri),
+                                    package: None,
+                                    component: Some((spec.package.clone(), cls)),
+                                    categories: vec![],
+                                    flags: crate::parcelables::FLAG_ACTIVITY_NEW_TASK,
+                                })
+                            }
+                            None => {
+                                log::warn!("activity: no activity handles {uri:?}; falling back to launcher");
+                                let main = spec.main_activity.clone().unwrap_or_default();
+                                (main.clone(), main_intent(&spec.package, &main))
+                            }
+                        }
+                    } else {
+                        let Some(main) = spec.main_activity.clone() else {
+                            log::error!("activity: no main activity for {}", spec.package);
+                            return Ok(true);
+                        };
+                        (main.clone(), main_intent(&spec.package, &main))
                     };
-                    let intent = crate::parcelables::Intent {
-                        action: Some("android.intent.action.MAIN".into()),
-                        package: None,
-                        component: Some((spec.package.clone(), main.clone())),
-                        categories: vec!["android.intent.category.LAUNCHER".into()],
-                        flags: crate::parcelables::FLAG_ACTIVITY_NEW_TASK,
-                    };
-                    std::thread::spawn(move || match Self::launch_activity(&thread, &spec, &controller, display, &main, intent) {
+                    std::thread::spawn(move || match Self::launch_activity(&thread, &spec, &controller, display, &target, intent) {
                         Ok(()) => log::info!("activity: launch transaction sent for {}", spec.package),
                         Err(e) => log::error!("activity: launch failed: {e:#}"),
                     });

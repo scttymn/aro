@@ -18,7 +18,8 @@ public class SecondActivity extends Activity {
         root.setBackgroundColor(0xFFF9A825);
         root.setGravity(Gravity.CENTER);
         TextView tv = new TextView(this);
-        tv.setText("Second Activity\nstartActivity works");
+        android.net.Uri data = getIntent() == null ? null : getIntent().getData();
+        tv.setText(data != null ? ("Deep link\n" + data) : "Second Activity\nstartActivity works");
         tv.setTextSize(44);
         tv.setTextColor(Color.BLACK);
         tv.setGravity(Gravity.CENTER);

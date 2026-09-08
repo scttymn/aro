@@ -30,8 +30,18 @@ impl Service for ActivityTaskService {
                 if data.read_i32()? != 0 {
                     // Intent body (see android.content.Intent.writeToParcel).
                     let action = ap::read_string8(data)?;
-                    let uri_type = data.read_i32()?; // Uri.writeToParcel: 0 == null
-                    if uri_type == 0 {
+                    let uri_type = data.read_i32()?; // Uri.writeToParcel: 0 null, 1 StringUri
+                    let data_uri = match uri_type {
+                        0 => None,
+                        1 => ap::read_string8(data)?, // StringUri: uriString
+                        other => {
+                            log::warn!("activity_task: startActivity data Uri type {other} unsupported; treating as no data");
+                            None
+                        }
+                    };
+                    // Only the StringUri (or null) shapes keep the parcel aligned for the fields
+                    // below; for other shapes we still resolve on action alone.
+                    if uri_type == 0 || uri_type == 1 {
                         let _type = ap::read_string8(data)?;
                         let _ident = ap::read_string8(data)?;
                         let _flags = data.read_i32()?;
@@ -39,9 +49,9 @@ impl Service for ActivityTaskService {
                         let intent_pkg = ap::read_string8(data)?;
                         let comp_pkg: Option<String> = data.read()?; // ComponentName: String16 package
                         let comp_cls: Option<String> = if comp_pkg.is_some() { data.read()? } else { None };
-                        self.activity.start_activity(comp_pkg.or(intent_pkg), comp_cls, action);
+                        self.activity.start_activity(comp_pkg.or(intent_pkg), comp_cls, action, data_uri);
                     } else {
-                        log::warn!("activity_task: startActivity with data URI (type {uri_type}) not resolved yet");
+                        self.activity.start_activity(None, None, action, None);
                     }
                 }
                 ap::no_exception(reply)?;

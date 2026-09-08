@@ -40,18 +40,30 @@ enum Cmd {
     },
     /// Start a session and run a shell inside it
     Shell,
+    /// Register a desktop scheme handler (.desktop + xdg-mime) so the desktop
+    /// routes an app's deep-link URLs (its VIEW intent-filter schemes) to ARO.
+    DesktopEntry {
+        apk: PathBuf,
+    },
     /// Start a session and launch an APK as a real app process (ActivityThread.main)
     App {
         apk: PathBuf,
         /// Activity to launch (default: the manifest's LAUNCHER activity)
         #[arg(long)]
         activity: Option<String>,
+        /// Deep link: launch via ACTION_VIEW with this URI instead of MAIN.
+        #[arg(long)]
+        url: Option<String>,
     },
 }
 
 fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).format_timestamp_millis().init();
     let cli = Cli::parse();
+    // A desktop-entry request only writes host files; it needs no session or image.
+    if let Cmd::DesktopEntry { apk } = &cli.cmd {
+        return write_desktop_entry(apk);
+    }
     let layout = Layout::default();
     if !layout.system.join("system/bin/app_process64").exists() {
         bail!("no unpacked system image at {} (run: aro-image unpack)", layout.system.display());
@@ -101,7 +113,7 @@ fn main() -> Result<()> {
 
     // 3b. Services.
     let registry = std::sync::Arc::new(services::registry::Registry { apps: std::sync::Mutex::new(Vec::new()), display });
-    let activity = std::sync::Arc::new(services::activity::ActivityService { registry: registry.clone(), pending: std::sync::Mutex::new(None), attached: std::sync::Mutex::new(None), client_controller: std::sync::Mutex::new(None) });
+    let activity = std::sync::Arc::new(services::activity::ActivityService { registry: registry.clone(), pending: std::sync::Mutex::new(None), attached: std::sync::Mutex::new(None), client_controller: std::sync::Mutex::new(None), launch_url: std::sync::Mutex::new(None) });
     let controller = services::binder_of(services::activity_task::ActivityClientController);
     *activity.client_controller.lock().unwrap() = Some(controller.clone());
     services::publish(&hub_impl, "activity_task", services::activity_task::ActivityTaskService { client_controller: std::sync::Mutex::new(Some(controller)), activity: activity.clone() });
@@ -181,7 +193,8 @@ fn main() -> Result<()> {
         Cmd::Shell => {
             cmd.arg("shell");
         }
-        Cmd::App { apk, activity: main_activity } => {
+        Cmd::DesktopEntry { .. } => unreachable!("handled before session setup"),
+        Cmd::App { apk, activity: main_activity, url } => {
             let apk = apk.canonicalize()?;
             let name = apk.file_name().unwrap().to_string_lossy().into_owned();
             let manifest = manifest.expect("manifest parsed above");
@@ -198,6 +211,9 @@ fn main() -> Result<()> {
             let mut spec = services::registry::AppSpec::from_manifest(&manifest, format!("/data/local/tmp/{name}"), 10001);
             if let Some(a) = main_activity {
                 spec.main_activity = Some(a);
+            }
+            if let Some(u) = url {
+                *activity.launch_url.lock().unwrap() = Some(u);
             }
             registry.apps.lock().unwrap().push(spec.clone());
             *activity.pending.lock().unwrap() = Some(spec);
@@ -230,4 +246,60 @@ fn prepare_vendor_dir(layout: &aro_exec::layout::Layout) -> anyhow::Result<Optio
     std::fs::copy(&src, hw.join("mapper.aro.so"))?;
     log::info!("gralloc: mapper {} -> {}", src.display(), hw.join("mapper.aro.so").display());
     Ok(Some(vendor))
+}
+
+
+/// Generate a freedesktop `.desktop` scheme handler for an app's deep-link
+/// URLs and register it, so `xdg-open <scheme>://...` (and links elsewhere on
+/// the desktop) route to `arod app <apk> --url`. The schemes come from the
+/// app's VIEW <intent-filter>s — nothing is hardcoded.
+fn write_desktop_entry(apk: &std::path::Path) -> Result<()> {
+    let apk = apk.canonicalize()?;
+    let manifest = aro_apk::inspect(&apk)?;
+    let mut schemes: Vec<String> = Vec::new();
+    for a in &manifest.activities {
+        for f in &a.filters {
+            if f.actions.iter().any(|x| x == "android.intent.action.VIEW") {
+                for s in &f.schemes {
+                    if !schemes.contains(s) {
+                        schemes.push(s.clone());
+                    }
+                }
+            }
+        }
+    }
+    if schemes.is_empty() {
+        bail!("{} declares no VIEW intent-filter with a data scheme; nothing to register", manifest.package);
+    }
+    let arod = std::env::current_exe()?;
+    let mimetypes: String = schemes.iter().map(|s| format!("x-scheme-handler/{s};")).collect();
+    let entry = format!(
+        "[Desktop Entry]\nType=Application\nName=ARO: {pkg}\nComment=Open {pkg} deep links via ARO\nExec={arod} app {apk} --url %u\nTerminal=false\nNoDisplay=true\nMimeType={mimetypes}\n",
+        pkg = manifest.package,
+        arod = arod.display(),
+        apk = apk.display(),
+    );
+    let dir = dirs_applications()?;
+    std::fs::create_dir_all(&dir)?;
+    let file = dir.join(format!("aro-{}.desktop", manifest.package));
+    std::fs::write(&file, entry)?;
+    log::info!("wrote {}", file.display());
+    // Refresh the desktop database and set this app as the handler for each scheme.
+    let _ = std::process::Command::new("update-desktop-database").arg(&dir).status();
+    let entry_name = format!("aro-{}.desktop", manifest.package);
+    for s in &schemes {
+        let st = std::process::Command::new("xdg-mime").args(["default", &entry_name, &format!("x-scheme-handler/{s}")]).status();
+        match st {
+            Ok(s2) if s2.success() => log::info!("registered scheme {s}:// -> {entry_name}"),
+            _ => log::warn!("could not set default handler for {s}:// (xdg-mime)"),
+        }
+    }
+    println!("Registered {} for: {}", manifest.package, schemes.iter().map(|s| format!("{s}://")).collect::<Vec<_>>().join(" "));
+    println!("Try:  xdg-open {}://hello/from-the-desktop", schemes[0]);
+    Ok(())
+}
+
+fn dirs_applications() -> Result<std::path::PathBuf> {
+    let base = std::env::var_os("XDG_DATA_HOME").map(std::path::PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/share"))).context("no HOME/XDG_DATA_HOME")?;
+    Ok(base.join("applications"))
 }
