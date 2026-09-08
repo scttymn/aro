@@ -1,0 +1,27 @@
+== android/content/pm/PackageItemInfo.<init>(Landroid/os/Parcel;)V
+CALL java.lang.Object.<init>()V
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readInt ()I  <- 
+CALL android.os.Parcelable$Creator.createFromParcel(Landroid/os/Parcel;)Ljava/lang/Object;
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readBundle ()Landroid/os/Bundle;  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readBoolean ()Z  <- 
+  return-void @0043
+
+== android/content/pm/PackageItemInfo.writeToParcel(Landroid/os/Parcel;I)V
+PARCEL writeString8 (Ljava/lang/String;)V  <- name:String
+PARCEL writeString8 (Ljava/lang/String;)V  <- packageName:String
+PARCEL writeInt (I)V  <- labelRes:I
+CALL android.text.TextUtils.writeToParcel(Ljava/lang/CharSequence;Landroid/os/Parcel;I)V
+PARCEL writeInt (I)V  <- icon:I
+PARCEL writeInt (I)V  <- logo:I
+PARCEL writeBundle (Landroid/os/Bundle;)V  <- metaData:Bundle
+PARCEL writeInt (I)V  <- banner:I
+PARCEL writeInt (I)V  <- showUserIcon:I
+PARCEL writeBoolean (Z)V  <- isArchived:Z
+  return-void @0032
+

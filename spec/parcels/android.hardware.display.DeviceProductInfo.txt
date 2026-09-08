@@ -1,0 +1,27 @@
+== android/hardware/display/DeviceProductInfo.<init>(Landroid/os/Parcel;)V
+CALL java.lang.Object.<init>()V
+PARCEL readString ()Ljava/lang/String;  <- 
+PARCEL readString ()Ljava/lang/String;  <- 
+PARCEL readValue (Ljava/lang/ClassLoader;)Ljava/lang/Object;  <- #0
+PARCEL readValue (Ljava/lang/ClassLoader;)Ljava/lang/Object;  <- #0
+PARCEL readValue (Ljava/lang/ClassLoader;)Ljava/lang/Object;  <- #0
+PARCEL readInt ()I  <- 
+PARCEL readTypedObject (Landroid/os/Parcelable$Creator;)Ljava/lang/Object;  <- CREATOR:Parcelable$Creator
+PARCEL readInt ()I  <- 
+  return-void @003e
+
+== android/hardware/display/DeviceProductInfo.<init>(Landroid/os/Parcel;Landroid/hardware/display/DeviceProductInfo-IA;)V
+CALL android.hardware.display.DeviceProductInfo.<init>(Landroid/os/Parcel;)V
+  return-void @0003
+
+== android/hardware/display/DeviceProductInfo.writeToParcel(Landroid/os/Parcel;I)V
+PARCEL writeString (Ljava/lang/String;)V  <- mName:String
+PARCEL writeString (Ljava/lang/String;)V  <- mManufacturerPnpId:String
+PARCEL writeValue (Ljava/lang/Object;)V  <- mProductId:String
+PARCEL writeValue (Ljava/lang/Object;)V  <- mModelYear:Integer
+PARCEL writeValue (Ljava/lang/Object;)V  <- mManufactureDate:DeviceProductInfo$ManufactureDate
+PARCEL writeInt (I)V  <- mConnectionToSinkType:I
+PARCEL writeTypedObject (Landroid/os/Parcelable;I)V  <- mEdidStructureMetadata:DeviceProductInfo$EdidStructureMetadata, v3
+PARCEL writeInt (I)V  <- mVideoInputType:I
+  return-void @0028
+

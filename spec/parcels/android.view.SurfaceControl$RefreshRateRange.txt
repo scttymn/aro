@@ -1,0 +1,5 @@
+== android/view/SurfaceControl$RefreshRateRange.writeToParcel(Landroid/os/Parcel;I)V
+PARCEL writeFloat (F)V  <- min:F
+PARCEL writeFloat (F)V  <- max:F
+  return-void @000a
+

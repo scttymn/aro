@@ -1,0 +1,76 @@
+== android/content/pm/ActivityInfo.<init>(Landroid/os/Parcel;)V
+CALL android.content.pm.ComponentInfo.<init>(Landroid/os/Parcel;)V
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+  if-ne @007b
+CALL android.content.pm.ActivityInfo$WindowLayout.<init>(Landroid/os/Parcel;)V
+PARCEL readInt ()I  <- 
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readFloat ()F  <- 
+PARCEL readFloat ()F  <- 
+PARCEL readBoolean ()Z  <- 
+CALL com.android.internal.util.Parcelling$BuiltIn$ForStringSet.unparcel(Landroid/os/Parcel;)Ljava/util/Set;
+CALL java.util.Set.isEmpty()Z
+  if-eqz @00ba
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readInt ()I  <- 
+  return-void @00cb
+
+== android/content/pm/ActivityInfo.<init>(Landroid/os/Parcel;Landroid/content/pm/ActivityInfo-IA;)V
+CALL android.content.pm.ActivityInfo.<init>(Landroid/os/Parcel;)V
+  return-void @0003
+
+== android/content/pm/ActivityInfo.writeToParcel(Landroid/os/Parcel;I)V
+CALL android.content.pm.ComponentInfo.writeToParcel(Landroid/os/Parcel;I)V
+PARCEL writeInt (I)V  <- theme:I
+PARCEL writeInt (I)V  <- launchMode:I
+PARCEL writeInt (I)V  <- documentLaunchMode:I
+PARCEL writeString8 (Ljava/lang/String;)V  <- permission:String
+PARCEL writeString8 (Ljava/lang/String;)V  <- taskAffinity:String
+PARCEL writeString8 (Ljava/lang/String;)V  <- targetActivity:String
+PARCEL writeString8 (Ljava/lang/String;)V  <- launchToken:String
+PARCEL writeInt (I)V  <- flags:I
+PARCEL writeInt (I)V  <- privateFlags:I
+PARCEL writeInt (I)V  <- screenOrientation:I
+PARCEL writeInt (I)V  <- configChanges:I
+PARCEL writeInt (I)V  <- softInputMode:I
+PARCEL writeInt (I)V  <- uiOptions:I
+PARCEL writeString8 (Ljava/lang/String;)V  <- parentActivityName:String
+PARCEL writeInt (I)V  <- persistableMode:I
+PARCEL writeInt (I)V  <- maxRecents:I
+PARCEL writeInt (I)V  <- lockTaskLaunchMode:I
+  if-eqz @005a
+PARCEL writeInt (I)V  <- #1
+CALL android.content.pm.ActivityInfo$WindowLayout.writeToParcel(Landroid/os/Parcel;)V
+  goto @0065
+PARCEL writeInt (I)V  <- #0
+PARCEL writeInt (I)V  <- resizeMode:I
+PARCEL writeString8 (Ljava/lang/String;)V  <- requestedVrComponent:String
+PARCEL writeInt (I)V  <- rotationAnimation:I
+PARCEL writeInt (I)V  <- colorMode:I
+PARCEL writeFloat (F)V  <- mMaxAspectRatio:F
+PARCEL writeFloat (F)V  <- mMinAspectRatio:F
+PARCEL writeBoolean (Z)V  <- supportsSizeChanges:Z
+CALL com.android.internal.util.Parcelling$BuiltIn$ForStringSet.parcel(Ljava/util/Set;Landroid/os/Parcel;I)V
+PARCEL writeString8 (Ljava/lang/String;)V  <- requiredDisplayCategory:String
+PARCEL writeInt (I)V  <- requireContentUriPermissionFromCaller:I
+  return-void @00a0
+

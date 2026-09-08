@@ -1,0 +1,8 @@
+== android/view/DisplayCutout$ParcelableWrapper.readFromParcel(Landroid/os/Parcel;)V
+CALL android.view.DisplayCutout$ParcelableWrapper.readCutoutFromParcel(Landroid/os/Parcel;)Landroid/view/DisplayCutout;
+  return-void @0006
+
+== android/view/DisplayCutout$ParcelableWrapper.writeToParcel(Landroid/os/Parcel;I)V
+CALL android.view.DisplayCutout$ParcelableWrapper.writeCutoutToParcel(Landroid/view/DisplayCutout;Landroid/os/Parcel;I)V
+  return-void @0005
+

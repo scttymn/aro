@@ -1,0 +1,18 @@
+== android/app/servertransaction/ResumeActivityItem.<init>(Landroid/os/Parcel;)V
+CALL android.app.servertransaction.ActivityLifecycleItem.<init>(Landroid/os/Parcel;)V
+PARCEL readInt ()I  <- 
+PARCEL readBoolean ()Z  <- 
+PARCEL readBoolean ()Z  <- 
+  return-void @0015
+
+== android/app/servertransaction/ResumeActivityItem.<init>(Landroid/os/Parcel;Landroid/app/servertransaction/ResumeActivityItem-IA;)V
+CALL android.app.servertransaction.ResumeActivityItem.<init>(Landroid/os/Parcel;)V
+  return-void @0003
+
+== android/app/servertransaction/ResumeActivityItem.writeToParcel(Landroid/os/Parcel;I)V
+CALL android.app.servertransaction.ActivityLifecycleItem.writeToParcel(Landroid/os/Parcel;I)V
+PARCEL writeInt (I)V  <- mProcState:I
+PARCEL writeBoolean (Z)V  <- mIsForward:Z
+PARCEL writeBoolean (Z)V  <- mShouldSendCompatFakeFocus:Z
+  return-void @0012
+

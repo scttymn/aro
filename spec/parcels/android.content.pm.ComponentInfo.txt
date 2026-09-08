@@ -1,0 +1,126 @@
+== android/content/pm/ComponentInfo.<init>(Landroid/os/Parcel;)V
+CALL android.content.pm.PackageItemInfo.<init>()V
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readInt ()I  <- 
+  if-eqz @0017
+  goto @001a
+  if-eqz @0020
+  goto @0023
+  if-eqz @0029
+  goto @002c
+  if-eqz @0032
+  goto @0035
+  if-eqz @003b
+  goto @003e
+  if-eqz @0042
+  goto @0045
+  if-eqz @0049
+  goto @004c
+  if-eqz @0050
+  goto @0053
+  if-eqz @0057
+  goto @005a
+  if-eqz @005e
+  goto @0061
+  if-eqz @0065
+  goto @0067
+  if-nez @0069
+PARCEL readString8 ()Ljava/lang/String;  <- 
+  if-nez @0071
+PARCEL readInt ()I  <- 
+CALL android.os.Parcelable$Creator.createFromParcel(Landroid/os/Parcel;)Ljava/lang/Object;
+  if-nez @0083
+PARCEL readInt ()I  <- 
+  if-nez @008b
+PARCEL readInt ()I  <- 
+  if-nez @0093
+PARCEL readBundle ()Landroid/os/Bundle;  <- 
+  if-nez @009b
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+CALL android.os.Parcelable$Creator.createFromParcel(Landroid/os/Parcel;)Ljava/lang/Object;
+  if-nez @00b3
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL createString8Array ()[Ljava/lang/String;  <- 
+PARCEL readInt ()I  <- 
+  if-eqz @00cd
+  if-eqz @00d1
+  if-eqz @00d7
+  if-eqz @00db
+  if-eqz @00e1
+  if-eqz @00e5
+  if-eqz @00ed
+  if-eqz @00ef
+  if-eqz @00f5
+  if-eqz @00fd
+  if-eqz @0105
+  return-void @010d
+
+== android/content/pm/ComponentInfo.writeToParcel(Landroid/os/Parcel;I)V
+PARCEL writeString8 (Ljava/lang/String;)V  <- name:String
+  if-eqz @0009
+  if-eqz @000f
+  if-eqz @0015
+  if-eqz @001d
+  if-eqz @0021
+CALL java.lang.Object.equals(Ljava/lang/Object;)Z
+  if-eqz @002d
+  goto @0030
+  if-eqz @0032
+  if-eqz @0038
+  if-eqz @003c
+CALL java.lang.Object.equals(Ljava/lang/Object;)Z
+  if-eqz @0044
+  goto @0047
+  if-eqz @0049
+  if-eqz @004f
+  if-eqz @0053
+  if-ne @005b
+  goto @005e
+  if-eqz @0060
+  if-eqz @0066
+  if-eqz @006a
+  if-ne @0072
+  if-nez @0076
+  if-nez @007c
+  goto @007f
+  if-eqz @0081
+  if-eqz @0087
+  if-eqz @008b
+  if-ne @0093
+  goto @0096
+  if-eqz @0098
+  if-eqz @009e
+  if-eqz @00a2
+  if-ne @00aa
+  goto @00ad
+  if-eqz @00af
+  if-eqz @00b5
+  if-eqz @00b9
+  if-ne @00c1
+  goto @00c3
+  if-eqz @00c5
+PARCEL writeInt (I)V  <- enabled:Z
+  if-nez @00cc
+PARCEL writeString8 (Ljava/lang/String;)V  <- packageName:String
+  if-nez @00d3
+PARCEL writeInt (I)V  <- labelRes:I
+CALL android.text.TextUtils.writeToParcel(Ljava/lang/CharSequence;Landroid/os/Parcel;I)V
+  if-nez @00df
+PARCEL writeInt (I)V  <- icon:I
+  if-nez @00e6
+PARCEL writeInt (I)V  <- logo:I
+  if-nez @00ed
+PARCEL writeBundle (Landroid/os/Bundle;)V  <- metaData:Bundle
+  if-nez @00f4
+PARCEL writeInt (I)V  <- banner:I
+PARCEL writeInt (I)V  <- showUserIcon:I
+CALL android.content.pm.ApplicationInfo.writeToParcel(Landroid/os/Parcel;I)V
+  if-nez @0105
+PARCEL writeString8 (Ljava/lang/String;)V  <- processName:String
+PARCEL writeString8 (Ljava/lang/String;)V  <- splitName:String
+PARCEL writeString8Array ([Ljava/lang/String;)V  <- attributionTags:String
+PARCEL writeInt (I)V  <- descriptionRes:I
+  return-void @011b
+

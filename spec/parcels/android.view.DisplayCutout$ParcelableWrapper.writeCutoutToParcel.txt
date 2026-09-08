@@ -1,0 +1,45 @@
+== android/view/DisplayCutout$ParcelableWrapper.writeCutoutToParcel(Landroid/view/DisplayCutout;Landroid/os/Parcel;I)V
+  if-nez @0000
+PARCEL writeInt (I)V  <- #-1
+  return-void @0006
+  if-ne @0009
+PARCEL writeInt (I)V  <- #0
+  return-void @000f
+PARCEL writeInt (I)V  <- #1
+CALL android.view.DisplayCutout.-$$Nest$fgetmSafeInsets(Landroid/view/DisplayCutout;)Landroid/graphics/Rect;
+PARCEL writeTypedObject (Landroid/os/Parcelable;I)V  <- (result), v3
+CALL android.view.DisplayCutout.-$$Nest$fgetmBounds(Landroid/view/DisplayCutout;)Landroid/view/DisplayCutout$Bounds;
+CALL android.view.DisplayCutout$Bounds.-$$Nest$mgetRects(Landroid/view/DisplayCutout$Bounds;)[Landroid/graphics/Rect;
+PARCEL writeTypedArray ([Landroid/os/Parcelable;I)V  <- (result), v3
+CALL android.view.DisplayCutout.-$$Nest$fgetmWaterfallInsets(Landroid/view/DisplayCutout;)Landroid/graphics/Insets;
+PARCEL writeTypedObject (Landroid/os/Parcelable;I)V  <- (result), v3
+CALL android.view.DisplayCutout.-$$Nest$fgetmCutoutPathParserInfo(Landroid/view/DisplayCutout;)Landroid/view/DisplayCutout$CutoutPathParserInfo;
+CALL android.view.DisplayCutout$CutoutPathParserInfo.getDisplayWidth()I
+PARCEL writeInt (I)V  <- (result)
+CALL android.view.DisplayCutout.-$$Nest$fgetmCutoutPathParserInfo(Landroid/view/DisplayCutout;)Landroid/view/DisplayCutout$CutoutPathParserInfo;
+CALL android.view.DisplayCutout$CutoutPathParserInfo.getDisplayHeight()I
+PARCEL writeInt (I)V  <- (result)
+CALL android.view.DisplayCutout.-$$Nest$fgetmCutoutPathParserInfo(Landroid/view/DisplayCutout;)Landroid/view/DisplayCutout$CutoutPathParserInfo;
+CALL android.view.DisplayCutout$CutoutPathParserInfo.getPhysicalDisplayWidth()I
+PARCEL writeInt (I)V  <- (result)
+CALL android.view.DisplayCutout.-$$Nest$fgetmCutoutPathParserInfo(Landroid/view/DisplayCutout;)Landroid/view/DisplayCutout$CutoutPathParserInfo;
+CALL android.view.DisplayCutout$CutoutPathParserInfo.getPhysicalDisplayHeight()I
+PARCEL writeInt (I)V  <- (result)
+CALL android.view.DisplayCutout.-$$Nest$fgetmCutoutPathParserInfo(Landroid/view/DisplayCutout;)Landroid/view/DisplayCutout$CutoutPathParserInfo;
+CALL android.view.DisplayCutout$CutoutPathParserInfo.getDensity()F
+PARCEL writeFloat (F)V  <- (result)
+CALL android.view.DisplayCutout.-$$Nest$fgetmCutoutPathParserInfo(Landroid/view/DisplayCutout;)Landroid/view/DisplayCutout$CutoutPathParserInfo;
+CALL android.view.DisplayCutout$CutoutPathParserInfo.getCutoutSpec()Ljava/lang/String;
+PARCEL writeString (Ljava/lang/String;)V  <- (result)
+CALL android.view.DisplayCutout.-$$Nest$fgetmCutoutPathParserInfo(Landroid/view/DisplayCutout;)Landroid/view/DisplayCutout$CutoutPathParserInfo;
+CALL android.view.DisplayCutout$CutoutPathParserInfo.getRotation()I
+PARCEL writeInt (I)V  <- (result)
+CALL android.view.DisplayCutout.-$$Nest$fgetmCutoutPathParserInfo(Landroid/view/DisplayCutout;)Landroid/view/DisplayCutout$CutoutPathParserInfo;
+CALL android.view.DisplayCutout$CutoutPathParserInfo.getScale()F
+PARCEL writeFloat (F)V  <- (result)
+CALL android.view.DisplayCutout.-$$Nest$fgetmCutoutPathParserInfo(Landroid/view/DisplayCutout;)Landroid/view/DisplayCutout$CutoutPathParserInfo;
+CALL android.view.DisplayCutout$CutoutPathParserInfo.getPhysicalPixelDisplaySizeRatio()F
+PARCEL writeFloat (F)V  <- (result)
+CALL android.view.DisplayCutout.-$$Nest$fgetmSideOverrides(Landroid/view/DisplayCutout;)[I
+PARCEL writeIntArray ([I)V  <- (result)
+  return-void @0097

@@ -1,0 +1,237 @@
+== android/content/pm/ApplicationInfo.<init>(Landroid/os/Parcel;)V
+CALL android.content.pm.PackageItemInfo.<init>(Landroid/os/Parcel;)V
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+  if-eqz @0074
+PARCEL readLong ()J  <- 
+PARCEL readLong ()J  <- 
+CALL java.util.UUID.<init>(JJ)V
+CALL android.os.storage.StorageManager.convert(Ljava/util/UUID;)Ljava/lang/String;
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL createString8Array ()[Ljava/lang/String;  <- 
+PARCEL createString8Array ()[Ljava/lang/String;  <- 
+PARCEL createString8Array ()[Ljava/lang/String;  <- 
+PARCEL readSparseArray (Ljava/lang/ClassLoader;Ljava/lang/Class;)Landroid/util/SparseArray;  <- #0, (result)
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readInt ()I  <- 
+  if-eqz @00d4
+  goto @00d7
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL createString8Array ()[Ljava/lang/String;  <- 
+PARCEL createString8Array ()[Ljava/lang/String;  <- 
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL createString8Array ()[Ljava/lang/String;  <- 
+PARCEL createTypedArrayList (Landroid/os/Parcelable$Creator;)Ljava/util/ArrayList;  <- CREATOR:Parcelable$Creator
+PARCEL createTypedArrayList (Landroid/os/Parcelable$Creator;)Ljava/util/ArrayList;  <- CREATOR:Parcelable$Creator
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readLong ()J  <- 
+CALL android.content.pm.ApplicationInfo.setVersionCode(J)V
+PARCEL readInt ()I  <- 
+  if-eqz @014a
+  goto @014d
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readBoolean ()Z  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL createString8Array ()[Ljava/lang/String;  <- 
+PARCEL readInt ()I  <- 
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+  if-eqz @01d3
+  goto @01d6
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+CALL com.android.internal.util.Parcelling$BuiltIn$ForBoolean.unparcel(Landroid/os/Parcel;)Ljava/lang/Boolean;
+PARCEL readLong ()J  <- 
+PARCEL readInt ()I  <- 
+  if-lez @0210
+CALL android.util.ArrayMap.<init>(I)V
+  if-ge @021a
+PARCEL readString ()Ljava/lang/String;  <- 
+PARCEL readString ()Ljava/lang/String;  <- 
+CALL android.util.ArrayMap.put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
+  goto @022b
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+  if-eqz @0236
+PARCEL readInt ()I  <- 
+PARCEL readBoolean ()Z  <- 
+PARCEL readBoolean ()Z  <- 
+PARCEL createTypedArray (Landroid/os/Parcelable$Creator;)[Ljava/lang/Object;  <- CREATOR:Parcelable$Creator
+CALL com.android.internal.util.Parcelling$BuiltIn$ForStringSet.unparcel(Landroid/os/Parcel;)Ljava/util/Set;
+CALL java.util.Set.isEmpty()Z
+  if-eqz @0263
+PARCEL createTypedArrayList (Landroid/os/Parcelable$Creator;)Ljava/util/ArrayList;  <- CREATOR:Parcelable$Creator
+  return-void @026f
+
+== android/content/pm/ApplicationInfo.<init>(Landroid/os/Parcel;Landroid/content/pm/ApplicationInfo-IA;)V
+CALL android.content.pm.ApplicationInfo.<init>(Landroid/os/Parcel;)V
+  return-void @0003
+
+== android/content/pm/ApplicationInfo.writeToParcel(Landroid/os/Parcel;I)V
+PARCEL maybeWriteSquashed (Landroid/os/Parcelable;)Z  <- v5
+  if-eqz @0004
+  goto/16 @0006
+PARCEL dataSize ()I  <- 
+CALL android.content.pm.PackageItemInfo.writeToParcel(Landroid/os/Parcel;I)V
+PARCEL writeString8 (Ljava/lang/String;)V  <- taskAffinity:String
+PARCEL writeString8 (Ljava/lang/String;)V  <- permission:String
+PARCEL writeString8 (Ljava/lang/String;)V  <- processName:String
+PARCEL writeString8 (Ljava/lang/String;)V  <- className:String
+PARCEL writeInt (I)V  <- theme:I
+PARCEL writeInt (I)V  <- flags:I
+PARCEL writeInt (I)V  <- privateFlags:I
+PARCEL writeInt (I)V  <- privateFlagsExt:I
+PARCEL writeInt (I)V  <- requiresSmallestWidthDp:I
+PARCEL writeInt (I)V  <- compatibleWidthLimitDp:I
+PARCEL writeInt (I)V  <- largestWidthLimitDp:I
+  if-eqz @0049
+PARCEL writeInt (I)V  <- #1
+CALL java.util.UUID.getMostSignificantBits()J
+PARCEL writeLong (J)V  <- (result), v4
+CALL java.util.UUID.getLeastSignificantBits()J
+PARCEL writeLong (J)V  <- (result), v4
+  goto @0061
+PARCEL writeInt (I)V  <- #0
+PARCEL writeString8 (Ljava/lang/String;)V  <- scanSourceDir:String
+PARCEL writeString8 (Ljava/lang/String;)V  <- scanPublicSourceDir:String
+PARCEL writeString8 (Ljava/lang/String;)V  <- sourceDir:String
+PARCEL writeString8 (Ljava/lang/String;)V  <- publicSourceDir:String
+PARCEL writeString8Array ([Ljava/lang/String;)V  <- splitNames:String
+PARCEL writeString8Array ([Ljava/lang/String;)V  <- splitSourceDirs:String
+PARCEL writeString8Array ([Ljava/lang/String;)V  <- splitPublicSourceDirs:String
+PARCEL writeSparseArray (Landroid/util/SparseArray;)V  <- splitDependencies:SparseArray
+PARCEL writeString8 (Ljava/lang/String;)V  <- nativeLibraryDir:String
+PARCEL writeString8 (Ljava/lang/String;)V  <- secondaryNativeLibraryDir:String
+PARCEL writeString8 (Ljava/lang/String;)V  <- nativeLibraryRootDir:String
+PARCEL writeInt (I)V  <- nativeLibraryRootRequiresIsa:Z
+PARCEL writeString8 (Ljava/lang/String;)V  <- primaryCpuAbi:String
+PARCEL writeString8 (Ljava/lang/String;)V  <- secondaryCpuAbi:String
+PARCEL writeString8Array ([Ljava/lang/String;)V  <- resourceDirs:String
+PARCEL writeString8Array ([Ljava/lang/String;)V  <- overlayPaths:String
+PARCEL writeString8 (Ljava/lang/String;)V  <- seInfo:String
+PARCEL writeString8 (Ljava/lang/String;)V  <- seInfoUser:String
+PARCEL writeString8Array ([Ljava/lang/String;)V  <- sharedLibraryFiles:String
+PARCEL writeTypedList (Ljava/util/List;)V  <- sharedLibraryInfos:List
+PARCEL writeTypedList (Ljava/util/List;)V  <- optionalSharedLibraryInfos:List
+PARCEL writeString8 (Ljava/lang/String;)V  <- dataDir:String
+PARCEL writeString8 (Ljava/lang/String;)V  <- deviceProtectedDataDir:String
+PARCEL writeString8 (Ljava/lang/String;)V  <- credentialProtectedDataDir:String
+PARCEL writeInt (I)V  <- uid:I
+PARCEL writeInt (I)V  <- pccUid:I
+PARCEL writeInt (I)V  <- minSdkVersion:I
+PARCEL writeInt (I)V  <- targetSdkVersion:I
+PARCEL writeLong (J)V  <- longVersionCode:J, v4
+PARCEL writeInt (I)V  <- enabled:Z
+PARCEL writeInt (I)V  <- enabledSetting:I
+PARCEL writeInt (I)V  <- installLocation:I
+PARCEL writeString8 (Ljava/lang/String;)V  <- manageSpaceActivityName:String
+PARCEL writeString8 (Ljava/lang/String;)V  <- backupAgentName:String
+PARCEL writeInt (I)V  <- backupAgentProcess:I
+PARCEL writeInt (I)V  <- descriptionRes:I
+PARCEL writeInt (I)V  <- uiOptions:I
+PARCEL writeInt (I)V  <- fullBackupContent:I
+PARCEL writeInt (I)V  <- dataExtractionRulesRes:I
+PARCEL writeBoolean (Z)V  <- crossProfile:Z
+PARCEL writeInt (I)V  <- networkSecurityConfigRes:I
+PARCEL writeInt (I)V  <- category:I
+PARCEL writeInt (I)V  <- targetSandboxVersion:I
+PARCEL writeString8 (Ljava/lang/String;)V  <- classLoaderName:String
+PARCEL writeString8Array ([Ljava/lang/String;)V  <- splitClassLoaderNames:String
+PARCEL writeInt (I)V  <- compileSdkVersion:I
+PARCEL writeString8 (Ljava/lang/String;)V  <- compileSdkVersionCodename:String
+PARCEL writeString8 (Ljava/lang/String;)V  <- appComponentFactory:String
+PARCEL writeInt (I)V  <- iconRes:I
+PARCEL writeInt (I)V  <- roundIconRes:I
+PARCEL writeInt (I)V  <- mHiddenApiPolicy:I
+PARCEL writeInt (I)V  <- hiddenUntilInstalled:Z
+PARCEL writeString8 (Ljava/lang/String;)V  <- zygotePreloadName:String
+PARCEL writeString8 (Ljava/lang/String;)V  <- zygotePreloadNativeLib:String
+PARCEL writeString8 (Ljava/lang/String;)V  <- zygotePreloadNativeFunc:String
+PARCEL writeInt (I)V  <- gwpAsanMode:I
+PARCEL writeInt (I)V  <- memtagMode:I
+PARCEL writeInt (I)V  <- nativeHeapZeroInitialized:I
+CALL com.android.internal.util.Parcelling$BuiltIn$ForBoolean.parcel(Ljava/lang/Boolean;Landroid/os/Parcel;I)V
+PARCEL writeLong (J)V  <- createTimestamp:J, v4
+  if-nez @0195
+PARCEL writeInt (I)V  <- #0
+  goto @019a
+CALL android.util.ArrayMap.size()I
+PARCEL writeInt (I)V  <- (result)
+  if-ge @01a2
+CALL android.util.ArrayMap.keyAt(I)Ljava/lang/Object;
+PARCEL writeString (Ljava/lang/String;)V  <- (result)
+CALL android.util.ArrayMap.valueAt(I)Ljava/lang/Object;
+PARCEL writeString (Ljava/lang/String;)V  <- (result)
+  goto @01bc
+PARCEL writeInt (I)V  <- localeConfigRes:I
+PARCEL writeInt (I)V  <- allowCrossUidActivitySwitchFromBelow:Z
+PARCEL writeInt (I)V  <- mPageSizeAppCompatFlags:I
+PARCEL writeBoolean (Z)V  <- isAppLockSupported:Z
+PARCEL writeBoolean (Z)V  <- isAppLockEnabled:Z
+PARCEL writeTypedArray ([Landroid/os/Parcelable;I)V  <- unalignedNativeLibraries:LibraryAlignmentInfo, v7
+CALL com.android.internal.util.Parcelling$BuiltIn$ForStringSet.parcel(Ljava/util/Set;Landroid/os/Parcel;I)V
+PARCEL writeTypedList (Ljava/util/List;)V  <- memoryBudgets:List
+PARCEL dataSize ()I  <- 
+  if-le @01f0
+CALL java.lang.StringBuilder.<init>(Ljava/lang/String;)V
+CALL java.lang.StringBuilder.append(I)Ljava/lang/StringBuilder;
+CALL java.lang.StringBuilder.append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+CALL java.lang.StringBuilder.append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+  if-eqz @0209
+CALL java.lang.StringBuilder.append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+CALL java.lang.StringBuilder.append(I)Ljava/lang/StringBuilder;
+  if-eqz @0218
+CALL java.lang.StringBuilder.append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+CALL java.lang.StringBuilder.append(I)Ljava/lang/StringBuilder;
+  if-eqz @0227
+CALL java.lang.StringBuilder.append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+CALL java.lang.StringBuilder.append(I)Ljava/lang/StringBuilder;
+  if-eqz @0236
+CALL java.lang.StringBuilder.append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+CALL java.lang.StringBuilder.append(I)Ljava/lang/StringBuilder;
+CALL java.lang.StringBuilder.toString()Ljava/lang/String;
+CALL android.util.Log.w(Ljava/lang/String;Ljava/lang/String;)I
+  return-void @024c
+

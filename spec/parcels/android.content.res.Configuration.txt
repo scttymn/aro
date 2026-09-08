@@ -1,0 +1,76 @@
+== android/content/res/Configuration.<init>(Landroid/os/Parcel;)V
+CALL java.lang.Object.<init>()V
+CALL android.app.WindowConfiguration.<init>()V
+CALL android.content.res.Configuration.readFromParcel(Landroid/os/Parcel;)V
+  return-void @000d
+
+== android/content/res/Configuration.<init>(Landroid/os/Parcel;Landroid/content/res/Configuration-IA;)V
+CALL android.content.res.Configuration.<init>(Landroid/os/Parcel;)V
+  return-void @0003
+
+== android/content/res/Configuration.readFromParcel(Landroid/os/Parcel;)V
+PARCEL readFloat ()F  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readTypedObject (Landroid/os/Parcelable$Creator;)Ljava/lang/Object;  <- CREATOR:Parcelable$Creator
+CALL android.os.LocaleList.get(I)Ljava/util/Locale;
+PARCEL readInt ()I  <- 
+  if-ne @0028
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+CALL android.app.WindowConfiguration.readFromParcel(Landroid/os/Parcel;)V
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+  return-void @00b0
+
+== android/content/res/Configuration.writeToParcel(Landroid/os/Parcel;I)V
+PARCEL writeFloat (F)V  <- fontScale:F
+PARCEL writeInt (I)V  <- mcc:I
+PARCEL writeInt (I)V  <- mnc:I
+CALL android.content.res.Configuration.fixUpLocaleList()V
+PARCEL writeTypedObject (Landroid/os/Parcelable;I)V  <- mLocaleList:LocaleList, v3
+  if-eqz @0019
+PARCEL writeInt (I)V  <- #1
+  goto @001f
+PARCEL writeInt (I)V  <- #0
+PARCEL writeInt (I)V  <- touchscreen:I
+PARCEL writeInt (I)V  <- keyboard:I
+PARCEL writeInt (I)V  <- keyboardHidden:I
+PARCEL writeInt (I)V  <- hardKeyboardHidden:I
+PARCEL writeInt (I)V  <- navigation:I
+PARCEL writeInt (I)V  <- navigationHidden:I
+PARCEL writeInt (I)V  <- orientation:I
+PARCEL writeInt (I)V  <- screenLayout:I
+PARCEL writeInt (I)V  <- colorMode:I
+PARCEL writeInt (I)V  <- uiMode:I
+PARCEL writeInt (I)V  <- screenWidthDp:I
+PARCEL writeInt (I)V  <- screenHeightDp:I
+PARCEL writeInt (I)V  <- smallestScreenWidthDp:I
+PARCEL writeInt (I)V  <- densityDpi:I
+PARCEL writeInt (I)V  <- compatScreenWidthDp:I
+PARCEL writeInt (I)V  <- compatScreenHeightDp:I
+PARCEL writeInt (I)V  <- compatSmallestScreenWidthDp:I
+CALL android.app.WindowConfiguration.writeToParcel(Landroid/os/Parcel;I)V
+PARCEL writeInt (I)V  <- assetsSeq:I
+PARCEL writeInt (I)V  <- seq:I
+PARCEL writeInt (I)V  <- fontWeightAdjustment:I
+PARCEL writeInt (I)V  <- mGrammaticalGender:I
+  return-void @0092
+

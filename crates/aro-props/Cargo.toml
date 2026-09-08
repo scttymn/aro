@@ -1,0 +1,10 @@
+[package]
+name = "aro-props"
+description = "Android system properties: writes the /dev/__properties__ area bionic reads"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true

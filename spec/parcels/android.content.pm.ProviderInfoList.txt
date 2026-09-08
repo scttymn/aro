@@ -1,0 +1,16 @@
+== android/content/pm/ProviderInfoList.<init>(Landroid/os/Parcel;)V
+CALL java.lang.Object.<init>()V
+CALL java.util.ArrayList.<init>()V
+PARCEL readTypedList (Ljava/util/List;Landroid/os/Parcelable$Creator;)V  <- v0, CREATOR:Parcelable$Creator
+  return-void @000f
+
+== android/content/pm/ProviderInfoList.<init>(Landroid/os/Parcel;Landroid/content/pm/ProviderInfoList-IA;)V
+CALL android.content.pm.ProviderInfoList.<init>(Landroid/os/Parcel;)V
+  return-void @0003
+
+== android/content/pm/ProviderInfoList.writeToParcel(Landroid/os/Parcel;I)V
+PARCEL allowSquashing ()Z  <- 
+PARCEL writeTypedList (Ljava/util/List;I)V  <- mList:List, v3
+PARCEL restoreAllowSquashing (Z)V  <- (result)
+  return-void @000c
+

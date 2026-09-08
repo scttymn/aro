@@ -1,0 +1,47 @@
+== android/content/pm/SharedLibraryInfo.<init>(Landroid/os/Parcel;)V
+CALL java.lang.Object.<init>()V
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readInt ()I  <- 
+  if-eqz @0014
+PARCEL createString8Array ()[Ljava/lang/String;  <- 
+CALL java.util.Arrays.asList([Ljava/lang/Object;)Ljava/util/List;
+  goto @0020
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readLong ()J  <- 
+PARCEL readInt ()I  <- 
+PARCEL readParcelable (Ljava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Object;  <- #0, (result)
+PARCEL readArrayList (Ljava/lang/ClassLoader;Ljava/lang/Class;)Ljava/util/ArrayList;  <- #0, (result)
+PARCEL createTypedArrayList (Landroid/os/Parcelable$Creator;)Ljava/util/ArrayList;  <- CREATOR:Parcelable$Creator
+PARCEL readBoolean ()Z  <- 
+CALL java.util.ArrayList.<init>()V
+CALL java.lang.Class.getClassLoader()Ljava/lang/ClassLoader;
+PARCEL readParcelableList (Ljava/util/List;Ljava/lang/ClassLoader;Ljava/lang/Class;)Ljava/util/List;  <- (result), (result), (result)
+PARCEL createStringArrayList ()Ljava/util/ArrayList;  <- 
+  return-void @0068
+
+== android/content/pm/SharedLibraryInfo.<init>(Landroid/os/Parcel;Landroid/content/pm/SharedLibraryInfo-IA;)V
+CALL android.content.pm.SharedLibraryInfo.<init>(Landroid/os/Parcel;)V
+  return-void @0003
+
+== android/content/pm/SharedLibraryInfo.writeToParcel(Landroid/os/Parcel;I)V
+PARCEL writeString8 (Ljava/lang/String;)V  <- mPath:String
+PARCEL writeString8 (Ljava/lang/String;)V  <- mPackageName:String
+  if-eqz @000c
+PARCEL writeInt (I)V  <- #1
+CALL java.util.List.size()I
+CALL java.util.List.toArray([Ljava/lang/Object;)[Ljava/lang/Object;
+PARCEL writeString8Array ([Ljava/lang/String;)V  <- (result)
+  goto @0023
+PARCEL writeInt (I)V  <- #0
+PARCEL writeString8 (Ljava/lang/String;)V  <- mName:String
+PARCEL writeLong (J)V  <- mVersion:J, (result)
+PARCEL writeInt (I)V  <- mType:I
+PARCEL writeParcelable (Landroid/os/Parcelable;I)V  <- mDeclaringPackage:VersionedPackage, v4
+PARCEL writeList (Ljava/util/List;)V  <- mDependentPackages:List
+PARCEL writeTypedList (Ljava/util/List;)V  <- mDependencies:List
+PARCEL writeBoolean (Z)V  <- mIsNative:Z
+PARCEL writeParcelableList (Ljava/util/List;I)V  <- mOptionalDependentPackages:List, v4
+PARCEL writeStringList (Ljava/util/List;)V  <- mCertDigests:List
+  return-void @0055
+

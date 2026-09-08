@@ -1,0 +1,90 @@
+== android/content/pm/ResolveInfo.<init>(Landroid/os/Parcel;)V
+CALL java.lang.Object.<init>()V
+PARCEL readInt ()I  <- 
+  if-eq @0012
+  if-eq @0015
+  if-eq @0018
+CALL android.util.Slog.w(Ljava/lang/String;Ljava/lang/String;)I
+  goto @0023
+CALL android.os.Parcelable$Creator.createFromParcel(Landroid/os/Parcel;)Ljava/lang/Object;
+  goto @002e
+CALL android.os.Parcelable$Creator.createFromParcel(Landroid/os/Parcel;)Ljava/lang/Object;
+  goto @0039
+CALL android.os.Parcelable$Creator.createFromParcel(Landroid/os/Parcel;)Ljava/lang/Object;
+PARCEL readInt ()I  <- 
+  if-eqz @0048
+CALL android.os.Parcelable$Creator.createFromParcel(Landroid/os/Parcel;)Ljava/lang/Object;
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+CALL android.os.Parcelable$Creator.createFromParcel(Landroid/os/Parcel;)Ljava/lang/Object;
+PARCEL readInt ()I  <- 
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+  if-eqz @0093
+  goto @0096
+PARCEL readInt ()I  <- 
+  if-eqz @009e
+  goto @00a1
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+  if-eqz @00af
+  goto @00b2
+PARCEL readInt ()I  <- 
+  if-eqz @00ba
+  goto @00bd
+PARCEL readInt ()I  <- 
+  if-eqz @00c5
+  goto @00c7
+PARCEL readInt ()I  <- 
+  if-eq @00d0
+CALL android.os.UserHandle.of(I)Landroid/os/UserHandle;
+  return-void @00d8
+
+== android/content/pm/ResolveInfo.<init>(Landroid/os/Parcel;Landroid/content/pm/ResolveInfo-IA;)V
+CALL android.content.pm.ResolveInfo.<init>(Landroid/os/Parcel;)V
+  return-void @0003
+
+== android/content/pm/ResolveInfo.writeToParcel(Landroid/os/Parcel;I)V
+  if-eqz @0004
+PARCEL writeInt (I)V  <- #1
+CALL android.content.pm.ActivityInfo.writeToParcel(Landroid/os/Parcel;I)V
+  goto @000e
+  if-eqz @0011
+PARCEL writeInt (I)V  <- #2
+CALL android.content.pm.ServiceInfo.writeToParcel(Landroid/os/Parcel;I)V
+  goto @001c
+  if-eqz @001f
+PARCEL writeInt (I)V  <- #3
+CALL android.content.pm.ProviderInfo.writeToParcel(Landroid/os/Parcel;I)V
+  goto @002a
+PARCEL writeInt (I)V  <- #0
+  if-eqz @0030
+PARCEL writeInt (I)V  <- #1
+CALL android.content.IntentFilter.writeToParcel(Landroid/os/Parcel;I)V
+  goto @003a
+PARCEL writeInt (I)V  <- #0
+PARCEL writeInt (I)V  <- priority:I
+PARCEL writeInt (I)V  <- preferredOrder:I
+PARCEL writeInt (I)V  <- match:I
+PARCEL writeInt (I)V  <- specificIndex:I
+PARCEL writeInt (I)V  <- labelRes:I
+CALL android.text.TextUtils.writeToParcel(Ljava/lang/CharSequence;Landroid/os/Parcel;I)V
+PARCEL writeInt (I)V  <- icon:I
+PARCEL writeString8 (Ljava/lang/String;)V  <- resolvePackageName:String
+PARCEL writeInt (I)V  <- targetUserId:I
+PARCEL writeInt (I)V  <- system:Z
+PARCEL writeInt (I)V  <- noResourceId:Z
+PARCEL writeInt (I)V  <- iconResourceId:I
+PARCEL writeInt (I)V  <- handleAllWebDataURI:Z
+PARCEL writeInt (I)V  <- mAutoResolutionAllowed:Z
+PARCEL writeInt (I)V  <- isInstantAppAvailable:Z
+  if-eqz @008b
+CALL android.os.UserHandle.getIdentifier()I
+  goto @0091
+PARCEL writeInt (I)V  <- #-2
+  return-void @0096
+

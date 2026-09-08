@@ -1,0 +1,17 @@
+[package]
+name = "arod"
+description = "ARO session supervisor: namespace session, binder bus, service manager, host services"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+nix.workspace = true
+libc.workspace = true
+rsbinder.workspace = true
+log.workspace = true
+env_logger.workspace = true
+aro-exec = { path = "../aro-exec" }
+aro-apk = { path = "../aro-apk" }

@@ -1,0 +1,16 @@
+== android/view/DisplayShape.writeToParcel(Landroid/os/Parcel;I)V
+PARCEL writeInt (I)V  <- mType:I
+PARCEL writeString8 (Ljava/lang/String;)V  <- mDisplayUniqueId:String
+PARCEL writeInt (I)V  <- mPhysicalDisplayWidth:I
+PARCEL writeInt (I)V  <- mPhysicalDisplayHeight:I
+PARCEL writeBoolean (Z)V  <- mIsRound:Z
+PARCEL writeString8 (Ljava/lang/String;)V  <- mSpec:String
+PARCEL writeFloat (F)V  <- mSpecRatio:F
+PARCEL writeInt (I)V  <- mDisplayWidth:I
+PARCEL writeInt (I)V  <- mDisplayHeight:I
+PARCEL writeInt (I)V  <- mRotation:I
+PARCEL writeInt (I)V  <- mOffsetX:I
+PARCEL writeInt (I)V  <- mOffsetY:I
+PARCEL writeFloat (F)V  <- mScale:F
+  return-void @0041
+

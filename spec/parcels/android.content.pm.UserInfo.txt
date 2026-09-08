@@ -1,0 +1,41 @@
+== android/content/pm/UserInfo.<init>(Landroid/os/Parcel;)V
+CALL java.lang.Object.<init>()V
+PARCEL readInt ()I  <- 
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readInt ()I  <- 
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readInt ()I  <- 
+PARCEL readLong ()J  <- 
+PARCEL readLong ()J  <- 
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readBoolean ()Z  <- 
+PARCEL readBoolean ()Z  <- 
+PARCEL readInt ()I  <- 
+PARCEL readBoolean ()Z  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+  return-void @005d
+
+== android/content/pm/UserInfo.<init>(Landroid/os/Parcel;Landroid/content/pm/UserInfo-IA;)V
+CALL android.content.pm.UserInfo.<init>(Landroid/os/Parcel;)V
+  return-void @0003
+
+== android/content/pm/UserInfo.writeToParcel(Landroid/os/Parcel;I)V
+PARCEL writeInt (I)V  <- id:I
+PARCEL writeString8 (Ljava/lang/String;)V  <- name:String
+PARCEL writeString8 (Ljava/lang/String;)V  <- iconPath:String
+PARCEL writeInt (I)V  <- flags:I
+PARCEL writeString8 (Ljava/lang/String;)V  <- userType:String
+PARCEL writeInt (I)V  <- serialNumber:I
+PARCEL writeLong (J)V  <- creationTime:J, v1
+PARCEL writeLong (J)V  <- lastLoggedInTime:J, v1
+PARCEL writeString8 (Ljava/lang/String;)V  <- lastLoggedInFingerprint:String
+PARCEL writeBoolean (Z)V  <- partial:Z
+PARCEL writeBoolean (Z)V  <- preCreated:Z
+PARCEL writeInt (I)V  <- profileGroupId:I
+PARCEL writeBoolean (Z)V  <- guestToRemove:Z
+PARCEL writeInt (I)V  <- restrictedProfileParentId:I
+PARCEL writeInt (I)V  <- profileBadge:I
+  return-void @004b
+

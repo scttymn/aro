@@ -1,0 +1,29 @@
+== android/view/Display$HdrCapabilities.<init>(Landroid/os/Parcel;)V
+CALL java.lang.Object.<init>()V
+CALL android.view.Display$HdrCapabilities.readFromParcel(Landroid/os/Parcel;)V
+  return-void @0013
+
+== android/view/Display$HdrCapabilities.<init>(Landroid/os/Parcel;Landroid/view/Display-IA;)V
+CALL android.view.Display$HdrCapabilities.<init>(Landroid/os/Parcel;)V
+  return-void @0003
+
+== android/view/Display$HdrCapabilities.readFromParcel(Landroid/os/Parcel;)V
+PARCEL readInt ()I  <- 
+  if-ge @0009
+PARCEL readInt ()I  <- 
+  goto @0015
+PARCEL readFloat ()F  <- 
+PARCEL readFloat ()F  <- 
+PARCEL readFloat ()F  <- 
+  return-void @0028
+
+== android/view/Display$HdrCapabilities.writeToParcel(Landroid/os/Parcel;I)V
+PARCEL writeInt (I)V  <- mSupportedHdrTypes:[I
+  if-ge @000a
+PARCEL writeInt (I)V  <- mSupportedHdrTypes:[I
+  goto @0013
+PARCEL writeFloat (F)V  <- mMaxLuminance:F
+PARCEL writeFloat (F)V  <- mMaxAverageLuminance:F
+PARCEL writeFloat (F)V  <- mMinLuminance:F
+  return-void @0023
+

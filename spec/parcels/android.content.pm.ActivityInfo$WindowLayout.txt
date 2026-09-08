@@ -1,0 +1,31 @@
+== android/content/pm/ActivityInfo$WindowLayout.<init>(Landroid/os/Parcel;)V
+CALL java.lang.Object.<init>()V
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readFloat ()F  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readFloat ()F  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readString8 ()Ljava/lang/String;  <- 
+  return-void @004b
+
+== android/content/pm/ActivityInfo$WindowLayout.writeToParcel(Landroid/os/Parcel;)V
+PARCEL writeInt (I)V  <- width:I
+PARCEL writeInt (I)V  <- complexWidth:I
+PARCEL writeFloat (F)V  <- widthFraction:F
+PARCEL writeInt (I)V  <- height:I
+PARCEL writeInt (I)V  <- complexHeight:I
+PARCEL writeFloat (F)V  <- heightFraction:F
+PARCEL writeInt (I)V  <- gravity:I
+PARCEL writeInt (I)V  <- minWidth:I
+PARCEL writeInt (I)V  <- complexMinWidth:I
+PARCEL writeInt (I)V  <- minHeight:I
+PARCEL writeInt (I)V  <- complexMinHeight:I
+PARCEL writeString8 (Ljava/lang/String;)V  <- windowLayoutAffinity:String
+  return-void @003c
+

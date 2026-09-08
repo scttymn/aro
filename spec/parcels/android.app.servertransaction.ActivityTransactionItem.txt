@@ -1,0 +1,9 @@
+== android/app/servertransaction/ActivityTransactionItem.<init>(Landroid/os/Parcel;)V
+PARCEL readStrongBinder ()Landroid/os/IBinder;  <- 
+CALL android.app.servertransaction.ActivityTransactionItem.<init>(Landroid/os/IBinder;)V
+  return-void @0007
+
+== android/app/servertransaction/ActivityTransactionItem.writeToParcel(Landroid/os/Parcel;I)V
+PARCEL writeStrongBinder (Landroid/os/IBinder;)V  <- mActivityToken:IBinder
+  return-void @0005
+

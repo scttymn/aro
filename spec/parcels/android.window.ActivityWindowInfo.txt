@@ -1,0 +1,19 @@
+== android/window/ActivityWindowInfo.<init>(Landroid/os/Parcel;)V
+CALL java.lang.Object.<init>()V
+CALL android.graphics.Rect.<init>()V
+CALL android.graphics.Rect.<init>()V
+PARCEL readBoolean ()Z  <- 
+CALL android.graphics.Rect.readFromParcel(Landroid/os/Parcel;)V
+CALL android.graphics.Rect.readFromParcel(Landroid/os/Parcel;)V
+  return-void @001d
+
+== android/window/ActivityWindowInfo.<init>(Landroid/os/Parcel;Landroid/window/ActivityWindowInfo-IA;)V
+CALL android.window.ActivityWindowInfo.<init>(Landroid/os/Parcel;)V
+  return-void @0003
+
+== android/window/ActivityWindowInfo.writeToParcel(Landroid/os/Parcel;I)V
+PARCEL writeBoolean (Z)V  <- mIsEmbedded:Z
+CALL android.graphics.Rect.writeToParcel(Landroid/os/Parcel;I)V
+CALL android.graphics.Rect.writeToParcel(Landroid/os/Parcel;I)V
+  return-void @000f
+

@@ -1,0 +1,9 @@
+== android/view/RoundedCorners.writeToParcel(Landroid/os/Parcel;I)V
+CALL android.view.RoundedCorners.equals(Ljava/lang/Object;)Z
+  if-eqz @0006
+PARCEL writeInt (I)V  <- #0
+  return-void @000c
+PARCEL writeInt (I)V  <- #1
+PARCEL writeTypedArray ([Landroid/os/Parcelable;I)V  <- mRoundedCorners:RoundedCorner, v3
+  return-void @0016
+

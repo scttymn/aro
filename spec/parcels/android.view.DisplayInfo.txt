@@ -1,0 +1,156 @@
+== android/view/DisplayInfo.<init>(Landroid/os/Parcel;)V
+CALL java.lang.Object.<init>()V
+CALL android.util.SparseArray.<init>()V
+CALL android.view.DisplayInfo.readFromParcel(Landroid/os/Parcel;)V
+  return-void @0029
+
+== android/view/DisplayInfo.<init>(Landroid/os/Parcel;Landroid/view/DisplayInfo-IA;)V
+CALL android.view.DisplayInfo.<init>(Landroid/os/Parcel;)V
+  return-void @0003
+
+== android/view/DisplayInfo.readFromParcel(Landroid/os/Parcel;)V
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readParcelable (Ljava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Object;  <- #0, (result)
+PARCEL readParcelable (Ljava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Object;  <- #0, (result)
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+CALL android.view.DisplayCutout$ParcelableWrapper.readCutoutFromParcel(Landroid/os/Parcel;)Landroid/view/DisplayCutout;
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readFloat ()F  <- 
+PARCEL readBoolean ()Z  <- 
+PARCEL readParcelable (Ljava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Object;  <- #0, (result)
+PARCEL readInt ()I  <- 
+  if-ge @009b
+PARCEL readFloat ()F  <- 
+  goto @00a7
+PARCEL createTypedArrayList (Landroid/os/Parcelable$Creator;)Ljava/util/ArrayList;  <- CREATOR:Parcelable$Creator
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+  if-ge @00c5
+CALL android.os.Parcelable$Creator.createFromParcel(Landroid/os/Parcel;)Ljava/lang/Object;
+  goto @00d5
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+  if-ge @00e5
+PARCEL readInt ()I  <- 
+  goto @00f1
+PARCEL readParcelable (Ljava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Object;  <- #0, (result)
+PARCEL readBoolean ()Z  <- 
+PARCEL readBoolean ()Z  <- 
+PARCEL readInt ()I  <- 
+PARCEL readFloat ()F  <- 
+PARCEL readFloat ()F  <- 
+PARCEL readLong ()J  <- 
+PARCEL readLong ()J  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readInt ()I  <- 
+PARCEL readFloat ()F  <- 
+PARCEL readFloat ()F  <- 
+PARCEL readFloat ()F  <- 
+PARCEL readFloat ()F  <- 
+PARCEL readFloat ()F  <- 
+PARCEL readTypedObject (Landroid/os/Parcelable$Creator;)Ljava/lang/Object;  <- CREATOR:Parcelable$Creator
+PARCEL readInt ()I  <- 
+  if-ge @017a
+PARCEL readInt ()I  <- 
+  goto @0186
+PARCEL readInt ()I  <- 
+PARCEL readTypedObject (Landroid/os/Parcelable$Creator;)Ljava/lang/Object;  <- CREATOR:Parcelable$Creator
+PARCEL readTypedObject (Landroid/os/Parcelable$Creator;)Ljava/lang/Object;  <- CREATOR:Parcelable$Creator
+PARCEL readTypedObject (Landroid/os/Parcelable$Creator;)Ljava/lang/Object;  <- CREATOR:Parcelable$Creator
+PARCEL readFloat ()F  <- 
+PARCEL readSparseArray (Ljava/lang/ClassLoader;Ljava/lang/Class;)Landroid/util/SparseArray;  <- #0, (result)
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readBoolean ()Z  <- 
+  return-void @01c5
+
+== android/view/DisplayInfo.writeToParcel(Landroid/os/Parcel;I)V
+PARCEL writeInt (I)V  <- layerStack:I
+PARCEL writeInt (I)V  <- flags:I
+PARCEL writeInt (I)V  <- type:I
+PARCEL writeInt (I)V  <- displayId:I
+PARCEL writeInt (I)V  <- displayGroupId:I
+PARCEL writeParcelable (Landroid/os/Parcelable;I)V  <- address:DisplayAddress, v7
+PARCEL writeParcelable (Landroid/os/Parcelable;I)V  <- deviceProductInfo:DeviceProductInfo, v7
+PARCEL writeString8 (Ljava/lang/String;)V  <- name:String
+PARCEL writeInt (I)V  <- appWidth:I
+PARCEL writeInt (I)V  <- appHeight:I
+PARCEL writeInt (I)V  <- smallestNominalAppWidth:I
+PARCEL writeInt (I)V  <- smallestNominalAppHeight:I
+PARCEL writeInt (I)V  <- largestNominalAppWidth:I
+PARCEL writeInt (I)V  <- largestNominalAppHeight:I
+PARCEL writeInt (I)V  <- logicalWidth:I
+PARCEL writeInt (I)V  <- logicalHeight:I
+CALL android.view.DisplayCutout$ParcelableWrapper.writeCutoutToParcel(Landroid/view/DisplayCutout;Landroid/os/Parcel;I)V
+PARCEL writeInt (I)V  <- rotation:I
+PARCEL writeInt (I)V  <- modeId:I
+PARCEL writeFloat (F)V  <- renderFrameRate:F
+PARCEL writeBoolean (Z)V  <- hasArrSupport:Z
+PARCEL writeParcelable (Landroid/os/Parcelable;I)V  <- frameRateCategoryRate:FrameRateCategoryRate, v7
+PARCEL writeInt (I)V  <- supportedRefreshRates:[F
+  if-ge @0079
+PARCEL writeFloat (F)V  <- v4
+  goto @0082
+PARCEL writeTypedList (Ljava/util/List;)V  <- frameRateVelocityMapping:List
+PARCEL writeInt (I)V  <- defaultModeId:I
+PARCEL writeInt (I)V  <- userPreferredModeId:I
+PARCEL writeInt (I)V  <- supportedModes:Display$Mode
+  if-ge @009c
+CALL android.view.Display$Mode.writeToParcel(Landroid/os/Parcel;I)V
+  goto @00a5
+PARCEL writeInt (I)V  <- colorMode:I
+PARCEL writeInt (I)V  <- supportedColorModes:[I
+  if-ge @00b5
+PARCEL writeInt (I)V  <- supportedColorModes:[I
+  goto @00be
+PARCEL writeParcelable (Landroid/os/Parcelable;I)V  <- hdrCapabilities:Display$HdrCapabilities, v7
+PARCEL writeBoolean (Z)V  <- isForceSdr:Z
+PARCEL writeBoolean (Z)V  <- minimalPostProcessingSupported:Z
+PARCEL writeInt (I)V  <- logicalDensityDpi:I
+PARCEL writeFloat (F)V  <- physicalXDpi:F
+PARCEL writeFloat (F)V  <- physicalYDpi:F
+PARCEL writeLong (J)V  <- appVsyncOffsetNanos:J, supportedColorModes:[I
+PARCEL writeLong (J)V  <- presentationDeadlineNanos:J, supportedColorModes:[I
+PARCEL writeInt (I)V  <- state:I
+PARCEL writeInt (I)V  <- committedState:I
+PARCEL writeInt (I)V  <- ownerUid:I
+PARCEL writeString8 (Ljava/lang/String;)V  <- ownerPackageName:String
+PARCEL writeString8 (Ljava/lang/String;)V  <- uniqueId:String
+PARCEL writeInt (I)V  <- removeMode:I
+PARCEL writeFloat (F)V  <- refreshRateOverride:F
+PARCEL writeFloat (F)V  <- brightnessMinimum:F
+PARCEL writeFloat (F)V  <- brightnessMaximum:F
+PARCEL writeFloat (F)V  <- brightnessDefault:F
+PARCEL writeFloat (F)V  <- brightnessDim:F
+PARCEL writeTypedObject (Landroid/os/Parcelable;I)V  <- roundedCorners:RoundedCorners, v7
+PARCEL writeInt (I)V  <- userDisabledHdrTypes:[I
+  if-ge @012c
+PARCEL writeInt (I)V  <- userDisabledHdrTypes:[I
+  goto @0135
+PARCEL writeInt (I)V  <- installOrientation:I
+PARCEL writeTypedObject (Landroid/os/Parcelable;I)V  <- displayShape:DisplayShape, v7
+PARCEL writeTypedObject (Landroid/os/Parcelable;I)V  <- layoutLimitedRefreshRate:SurfaceControl$RefreshRateRange, v7
+PARCEL writeTypedObject (Landroid/os/Parcelable;I)V  <- appRequestRenderRefreshRateRange:SurfaceControl$RefreshRateRange, v7
+PARCEL writeFloat (F)V  <- hdrSdrRatio:F
+PARCEL writeSparseArray (Landroid/util/SparseArray;)V  <- thermalRefreshRateThrottling:SparseArray
+PARCEL writeString8 (Ljava/lang/String;)V  <- thermalBrightnessThrottlingDataId:String
+PARCEL writeBoolean (Z)V  <- canHostTasks:Z
+  return-void @015e
+

@@ -1,0 +1,189 @@
+== android/content/pm/PackageInfo.<init>(Landroid/os/Parcel;)V
+CALL java.lang.Object.<init>()V
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL createString8Array ()[Ljava/lang/String;  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readInt ()I  <- 
+PARCEL createIntArray ()[I  <- 
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+  if-eqz @0044
+CALL android.os.Parcelable$Creator.createFromParcel(Landroid/os/Parcel;)Ljava/lang/Object;
+PARCEL readLong ()J  <- 
+PARCEL readLong ()J  <- 
+PARCEL createIntArray ()[I  <- 
+PARCEL createTypedArray (Landroid/os/Parcelable$Creator;)[Ljava/lang/Object;  <- CREATOR:Parcelable$Creator
+PARCEL createTypedArray (Landroid/os/Parcelable$Creator;)[Ljava/lang/Object;  <- CREATOR:Parcelable$Creator
+PARCEL createTypedArray (Landroid/os/Parcelable$Creator;)[Ljava/lang/Object;  <- CREATOR:Parcelable$Creator
+PARCEL createTypedArray (Landroid/os/Parcelable$Creator;)[Ljava/lang/Object;  <- CREATOR:Parcelable$Creator
+PARCEL createTypedArray (Landroid/os/Parcelable$Creator;)[Ljava/lang/Object;  <- CREATOR:Parcelable$Creator
+PARCEL createTypedArray (Landroid/os/Parcelable$Creator;)[Ljava/lang/Object;  <- CREATOR:Parcelable$Creator
+PARCEL createString8Array ()[Ljava/lang/String;  <- 
+PARCEL createIntArray ()[I  <- 
+CALL android.content.pm.PackageInfo.readRequestedPermissionsPurposes(Landroid/os/Parcel;)V
+PARCEL createTypedArray (Landroid/os/Parcelable$Creator;)[Ljava/lang/Object;  <- CREATOR:Parcelable$Creator
+PARCEL createTypedArray (Landroid/os/Parcelable$Creator;)[Ljava/lang/Object;  <- CREATOR:Parcelable$Creator
+PARCEL createTypedArray (Landroid/os/Parcelable$Creator;)[Ljava/lang/Object;  <- CREATOR:Parcelable$Creator
+PARCEL createTypedArray (Landroid/os/Parcelable$Creator;)[Ljava/lang/Object;  <- CREATOR:Parcelable$Creator
+PARCEL createTypedArray (Landroid/os/Parcelable$Creator;)[Ljava/lang/Object;  <- CREATOR:Parcelable$Creator
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+  if-eqz @00ea
+  goto @00ed
+PARCEL readInt ()I  <- 
+  if-eqz @00f5
+  goto @00f8
+PARCEL readInt ()I  <- 
+  if-eqz @0100
+  goto @0102
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readInt ()I  <- 
+PARCEL readBoolean ()Z  <- 
+PARCEL readInt ()I  <- 
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readInt ()I  <- 
+  if-eqz @013a
+CALL android.os.Parcelable$Creator.createFromParcel(Landroid/os/Parcel;)Ljava/lang/Object;
+PARCEL readBoolean ()Z  <- 
+PARCEL readBoolean ()Z  <- 
+PARCEL readLong ()J  <- 
+PARCEL readInt ()I  <- 
+  if-eqz @015c
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readBoolean ()Z  <- 
+  return-void @016a
+
+== android/content/pm/PackageInfo.<init>(Landroid/os/Parcel;Landroid/content/pm/PackageInfo-IA;)V
+CALL android.content.pm.PackageInfo.<init>(Landroid/os/Parcel;)V
+  return-void @0003
+
+== android/content/pm/PackageInfo.writeToParcel(Landroid/os/Parcel;I)V
+PARCEL dataSize ()I  <- 
+PARCEL allowSquashing ()Z  <- 
+PARCEL writeString8 (Ljava/lang/String;)V  <- packageName:String
+PARCEL writeString8Array ([Ljava/lang/String;)V  <- splitNames:String
+PARCEL writeInt (I)V  <- versionCode:I
+PARCEL writeInt (I)V  <- versionCodeMajor:I
+PARCEL writeString8 (Ljava/lang/String;)V  <- versionName:String
+PARCEL writeInt (I)V  <- baseRevisionCode:I
+PARCEL writeIntArray ([I)V  <- splitRevisionCodes:[I
+PARCEL writeString8 (Ljava/lang/String;)V  <- sharedUserId:String
+PARCEL writeInt (I)V  <- sharedUserLabel:I
+  if-eqz @003f
+PARCEL writeInt (I)V  <- #1
+CALL android.content.pm.ApplicationInfo.writeToParcel(Landroid/os/Parcel;I)V
+  goto @0049
+PARCEL writeInt (I)V  <- #0
+PARCEL writeLong (J)V  <- firstInstallTime:J, v9
+PARCEL writeLong (J)V  <- lastUpdateTime:J, v9
+PARCEL writeIntArray ([I)V  <- gids:[I
+CALL android.content.pm.PackageInfo.writeAndCount(Landroid/os/Parcel;[Landroid/os/Parcelable;I)I
+CALL android.content.pm.PackageInfo.writeAndCount(Landroid/os/Parcel;[Landroid/os/Parcelable;I)I
+CALL android.content.pm.PackageInfo.writeAndCount(Landroid/os/Parcel;[Landroid/os/Parcelable;I)I
+CALL android.content.pm.PackageInfo.writeAndCount(Landroid/os/Parcel;[Landroid/os/Parcelable;I)I
+PARCEL writeTypedArray ([Landroid/os/Parcelable;I)V  <- instrumentation:InstrumentationInfo, v2
+CALL android.content.pm.PackageInfo.writeAndCount(Landroid/os/Parcel;[Landroid/os/Parcelable;I)I
+CALL android.content.pm.PackageInfo.writeAndCount(Landroid/os/Parcel;[Ljava/lang/String;)I
+PARCEL writeIntArray ([I)V  <- requestedPermissionsFlags:[I
+CALL android.content.pm.PackageInfo.writeRequestedPermissionsPurposes(Landroid/os/Parcel;)V
+CALL android.content.pm.PackageInfo.writeAndCount(Landroid/os/Parcel;[Landroid/os/Parcelable;I)I
+PARCEL writeTypedArray ([Landroid/os/Parcelable;I)V  <- configPreferences:ConfigurationInfo, v2
+PARCEL writeTypedArray ([Landroid/os/Parcelable;I)V  <- reqFeatures:FeatureInfo, v2
+PARCEL writeTypedArray ([Landroid/os/Parcelable;I)V  <- featureGroups:FeatureGroupInfo, v2
+CALL android.content.pm.PackageInfo.writeAndCount(Landroid/os/Parcel;[Landroid/os/Parcelable;I)I
+PARCEL writeInt (I)V  <- installLocation:I
+PARCEL writeInt (I)V  <- isStub:Z
+PARCEL writeInt (I)V  <- coreApp:Z
+PARCEL writeInt (I)V  <- requiredForAllUsers:Z
+PARCEL writeString8 (Ljava/lang/String;)V  <- restrictedAccountType:String
+PARCEL writeString8 (Ljava/lang/String;)V  <- requiredAccountType:String
+PARCEL writeString8 (Ljava/lang/String;)V  <- overlayTarget:String
+PARCEL writeString8 (Ljava/lang/String;)V  <- overlayCategory:String
+PARCEL writeInt (I)V  <- overlayPriority:I
+PARCEL writeBoolean (Z)V  <- mOverlayIsStatic:Z
+PARCEL writeInt (I)V  <- compileSdkVersion:I
+PARCEL writeString8 (Ljava/lang/String;)V  <- compileSdkVersionCodename:String
+  if-eqz @00e6
+PARCEL writeInt (I)V  <- #1
+CALL android.content.pm.SigningInfo.writeToParcel(Landroid/os/Parcel;I)V
+  goto @00f0
+PARCEL writeInt (I)V  <- #0
+PARCEL writeBoolean (Z)V  <- isApex:Z
+PARCEL writeBoolean (Z)V  <- isActiveApex:Z
+PARCEL writeLong (J)V  <- mArchiveTimeMillis:J, (result)
+  if-eqz @0106
+PARCEL writeInt (I)V  <- #1
+PARCEL writeString8 (Ljava/lang/String;)V  <- mApexPackageName:String
+  goto @0110
+PARCEL writeInt (I)V  <- #0
+PARCEL writeBoolean (Z)V  <- mIsAppMetadataVerified:Z
+PARCEL restoreAllowSquashing (Z)V  <- (result)
+PARCEL dataSize ()I  <- 
+  if-le @0124
+CALL java.lang.StringBuilder.<init>(Ljava/lang/String;)V
+CALL java.lang.StringBuilder.append(I)Ljava/lang/StringBuilder;
+CALL java.lang.StringBuilder.append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+CALL java.lang.StringBuilder.append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+  if-eqz @013d
+CALL java.lang.StringBuilder.append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+CALL java.lang.StringBuilder.append(I)Ljava/lang/StringBuilder;
+  if-eqz @0151
+CALL java.lang.StringBuilder.append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+CALL java.lang.StringBuilder.append(I)Ljava/lang/StringBuilder;
+CALL java.lang.StringBuilder.append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+CALL java.lang.StringBuilder.append(I)Ljava/lang/StringBuilder;
+CALL java.lang.StringBuilder.append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+  if-eqz @0169
+CALL java.lang.StringBuilder.append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+CALL java.lang.StringBuilder.append(I)Ljava/lang/StringBuilder;
+CALL java.lang.StringBuilder.append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+CALL java.lang.StringBuilder.append(I)Ljava/lang/StringBuilder;
+CALL java.lang.StringBuilder.append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+  if-eqz @0181
+CALL java.lang.StringBuilder.append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+CALL java.lang.StringBuilder.append(I)Ljava/lang/StringBuilder;
+CALL java.lang.StringBuilder.append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+CALL java.lang.StringBuilder.append(I)Ljava/lang/StringBuilder;
+CALL java.lang.StringBuilder.append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+  if-eqz @0199
+CALL java.lang.StringBuilder.append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+CALL java.lang.StringBuilder.append(I)Ljava/lang/StringBuilder;
+CALL java.lang.StringBuilder.append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+CALL java.lang.StringBuilder.append(I)Ljava/lang/StringBuilder;
+CALL java.lang.StringBuilder.append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+  if-eqz @01b1
+CALL java.lang.StringBuilder.append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+CALL java.lang.StringBuilder.append(I)Ljava/lang/StringBuilder;
+CALL java.lang.StringBuilder.append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+CALL java.lang.StringBuilder.append(I)Ljava/lang/StringBuilder;
+CALL java.lang.StringBuilder.append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+  if-eqz @01c9
+CALL java.lang.StringBuilder.append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+CALL java.lang.StringBuilder.append(I)Ljava/lang/StringBuilder;
+CALL java.lang.StringBuilder.append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+CALL java.lang.StringBuilder.append(I)Ljava/lang/StringBuilder;
+CALL java.lang.StringBuilder.append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+  if-eqz @01e1
+CALL java.lang.StringBuilder.append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+CALL java.lang.StringBuilder.append(I)Ljava/lang/StringBuilder;
+CALL java.lang.StringBuilder.append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+CALL java.lang.StringBuilder.append(I)Ljava/lang/StringBuilder;
+CALL java.lang.StringBuilder.append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+  if-eqz @01f9
+CALL java.lang.StringBuilder.append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+CALL java.lang.StringBuilder.append(I)Ljava/lang/StringBuilder;
+CALL java.lang.StringBuilder.append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+CALL java.lang.StringBuilder.append(I)Ljava/lang/StringBuilder;
+CALL java.lang.StringBuilder.append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+CALL java.lang.StringBuilder.append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+CALL java.lang.StringBuilder.append(Z)Ljava/lang/StringBuilder;
+CALL java.lang.StringBuilder.toString()Ljava/lang/String;
+CALL android.util.Log.w(Ljava/lang/String;Ljava/lang/String;)I
+  return-void @0220
+

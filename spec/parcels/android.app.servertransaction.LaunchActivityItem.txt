@@ -1,0 +1,70 @@
+== android/app/servertransaction/LaunchActivityItem.<init>(Landroid/os/Parcel;)V
+CALL android.app.servertransaction.ClientTransactionItem.<init>()V
+PARCEL readStrongBinder ()Landroid/os/IBinder;  <- 
+PARCEL readInt ()I  <- 
+PARCEL readTypedObject (Landroid/os/Parcelable$Creator;)Ljava/lang/Object;  <- CREATOR:Parcelable$Creator
+CALL java.util.Objects.requireNonNull(Ljava/lang/Object;)Ljava/lang/Object;
+PARCEL readTypedObject (Landroid/os/Parcelable$Creator;)Ljava/lang/Object;  <- CREATOR:Parcelable$Creator
+CALL java.util.Objects.requireNonNull(Ljava/lang/Object;)Ljava/lang/Object;
+PARCEL readInt ()I  <- 
+PARCEL readString ()Ljava/lang/String;  <- 
+PARCEL readStrongBinder ()Landroid/os/IBinder;  <- 
+CALL com.android.internal.app.IVoiceInteractor$Stub.asInterface(Landroid/os/IBinder;)Lcom/android/internal/app/IVoiceInteractor;
+PARCEL readInt ()I  <- 
+CALL java.lang.Object.getClass()Ljava/lang/Class;
+CALL java.lang.Class.getClassLoader()Ljava/lang/ClassLoader;
+PARCEL readBundle (Ljava/lang/ClassLoader;)Landroid/os/Bundle;  <- (result)
+CALL java.lang.Object.getClass()Ljava/lang/Class;
+CALL java.lang.Class.getClassLoader()Ljava/lang/ClassLoader;
+PARCEL readPersistableBundle (Ljava/lang/ClassLoader;)Landroid/os/PersistableBundle;  <- (result)
+PARCEL createTypedArrayList (Landroid/os/Parcelable$Creator;)Ljava/util/ArrayList;  <- CREATOR:Parcelable$Creator
+PARCEL createTypedArrayList (Landroid/os/Parcelable$Creator;)Ljava/util/ArrayList;  <- CREATOR:Parcelable$Creator
+PARCEL readTypedObject (Landroid/os/Parcelable$Creator;)Ljava/lang/Object;  <- CREATOR:Parcelable$Creator
+PARCEL readBoolean ()Z  <- 
+PARCEL readTypedObject (Landroid/os/Parcelable$Creator;)Ljava/lang/Object;  <- CREATOR:Parcelable$Creator
+PARCEL readStrongBinder ()Landroid/os/IBinder;  <- 
+PARCEL readStrongBinder ()Landroid/os/IBinder;  <- 
+CALL android.app.IActivityClientController$Stub.asInterface(Landroid/os/IBinder;)Landroid/app/IActivityClientController;
+PARCEL readStrongBinder ()Landroid/os/IBinder;  <- 
+PARCEL readBoolean ()Z  <- 
+PARCEL readStrongBinder ()Landroid/os/IBinder;  <- 
+PARCEL readStrongBinder ()Landroid/os/IBinder;  <- 
+PARCEL readTypedObject (Landroid/os/Parcelable$Creator;)Ljava/lang/Object;  <- CREATOR:Parcelable$Creator
+CALL java.util.Objects.requireNonNull(Ljava/lang/Object;)Ljava/lang/Object;
+PARCEL readInt ()I  <- 
+PARCEL readTypedObject (Landroid/os/Parcelable$Creator;)Ljava/lang/Object;  <- CREATOR:Parcelable$Creator
+PARCEL readTypedObject (Landroid/os/Parcelable$Creator;)Ljava/lang/Object;  <- CREATOR:Parcelable$Creator
+  return-void @00e3
+
+== android/app/servertransaction/LaunchActivityItem.<init>(Landroid/os/Parcel;Landroid/app/servertransaction/LaunchActivityItem-IA;)V
+CALL android.app.servertransaction.LaunchActivityItem.<init>(Landroid/os/Parcel;)V
+  return-void @0003
+
+== android/app/servertransaction/LaunchActivityItem.writeToParcel(Landroid/os/Parcel;I)V
+PARCEL writeStrongBinder (Landroid/os/IBinder;)V  <- mActivityToken:IBinder
+PARCEL writeInt (I)V  <- mIdent:I
+PARCEL writeTypedObject (Landroid/os/Parcelable;I)V  <- mCurConfig:Configuration, v3
+PARCEL writeTypedObject (Landroid/os/Parcelable;I)V  <- mOverrideConfig:Configuration, v3
+PARCEL writeInt (I)V  <- mDeviceId:I
+PARCEL writeString (Ljava/lang/String;)V  <- mReferrer:String
+PARCEL writeStrongInterface (Landroid/os/IInterface;)V  <- mVoiceInteractor:IVoiceInteractor
+PARCEL writeInt (I)V  <- mProcState:I
+PARCEL writeBundle (Landroid/os/Bundle;)V  <- mState:Bundle
+PARCEL writePersistableBundle (Landroid/os/PersistableBundle;)V  <- mPersistentState:PersistableBundle
+PARCEL writeTypedList (Ljava/util/List;I)V  <- mPendingResults:List, v3
+PARCEL writeTypedList (Ljava/util/List;I)V  <- mPendingNewIntents:List, v3
+PARCEL writeTypedObject (Landroid/os/Parcelable;I)V  <- mSceneTransitionInfo:ActivityOptions$SceneTransitionInfo, v3
+PARCEL writeBoolean (Z)V  <- mIsForward:Z
+PARCEL writeTypedObject (Landroid/os/Parcelable;I)V  <- mProfilerInfo:ProfilerInfo, v3
+PARCEL writeStrongBinder (Landroid/os/IBinder;)V  <- mAssistToken:IBinder
+PARCEL writeStrongInterface (Landroid/os/IInterface;)V  <- mActivityClientController:IActivityClientController
+PARCEL writeStrongBinder (Landroid/os/IBinder;)V  <- mShareableActivityToken:IBinder
+PARCEL writeBoolean (Z)V  <- mLaunchedFromBubble:Z
+PARCEL writeStrongBinder (Landroid/os/IBinder;)V  <- mTaskFragmentToken:IBinder
+PARCEL writeStrongBinder (Landroid/os/IBinder;)V  <- mInitialCallerInfoAccessToken:IBinder
+PARCEL writeTypedObject (Landroid/os/Parcelable;I)V  <- mActivityWindowInfo:ActivityWindowInfo, v3
+PARCEL writeInt (I)V  <- mDisplayId:I
+PARCEL writeTypedObject (Landroid/os/Parcelable;I)V  <- mIntent:Intent, v3
+PARCEL writeTypedObject (Landroid/os/Parcelable;I)V  <- mInfo:ActivityInfo, v3
+  return-void @007d
+

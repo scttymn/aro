@@ -1,0 +1,8 @@
+== android/hardware/OverlayProperties.writeToParcel(Landroid/os/Parcel;I)V
+  if-nez @0006
+PARCEL writeInt (I)V  <- #0
+  return-void @000c
+PARCEL writeInt (I)V  <- #1
+CALL android.hardware.OverlayProperties.nWriteOverlayPropertiesToParcel(JLandroid/os/Parcel;)V
+  return-void @0016
+

@@ -1,0 +1,123 @@
+== android/content/Intent.<init>(Landroid/os/Parcel;)V
+CALL java.lang.Object.<init>()V
+CALL android.content.Intent.readFromParcel(Landroid/os/Parcel;)V
+  return-void @0009
+
+== android/content/Intent.readFromParcel(Landroid/os/Parcel;)V
+PARCEL readString8 ()Ljava/lang/String;  <- 
+CALL android.content.Intent.setAction(Ljava/lang/String;)Landroid/content/Intent;
+CALL android.os.Parcelable$Creator.createFromParcel(Landroid/os/Parcel;)Ljava/lang/Object;
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readInt ()I  <- 
+PARCEL readInt ()I  <- 
+PARCEL readString8 ()Ljava/lang/String;  <- 
+CALL android.content.ComponentName.readFromParcel(Landroid/os/Parcel;)Landroid/content/ComponentName;
+PARCEL readInt ()I  <- 
+  if-eqz @003c
+CALL android.os.Parcelable$Creator.createFromParcel(Landroid/os/Parcel;)Ljava/lang/Object;
+PARCEL readInt ()I  <- 
+  if-lez @004e
+CALL android.util.ArraySet.<init>()V
+  if-ge @0058
+PARCEL readString8 ()Ljava/lang/String;  <- 
+CALL java.lang.String.intern()Ljava/lang/String;
+CALL android.util.ArraySet.add(Ljava/lang/Object;)Z
+  goto @0069
+PARCEL readInt ()I  <- 
+  if-eqz @0070
+CALL android.content.Intent.<init>(Landroid/os/Parcel;)V
+PARCEL readInt ()I  <- 
+  if-eqz @007d
+CALL android.content.ClipData.<init>(Landroid/os/Parcel;)V
+PARCEL readInt ()I  <- 
+PARCEL readBundle ()Landroid/os/Bundle;  <- 
+PARCEL readInt ()I  <- 
+  if-eqz @0096
+CALL android.content.Intent.<init>(Landroid/os/Parcel;)V
+CALL com.android.internal.hidden_from_bootclasspath.android.security.Flags.preventIntentRedirect()Z
+  if-eqz @00a3
+PARCEL readInt ()I  <- 
+  if-eqz @00a9
+CALL android.content.Intent$CreatorTokenInfo.<init>(Landroid/content/Intent-IA;)V
+PARCEL readStrongBinder ()Landroid/os/IBinder;  <- 
+CALL android.content.Intent$CreatorTokenInfo.-$$Nest$fputmCreatorToken(Landroid/content/Intent$CreatorTokenInfo;Landroid/os/IBinder;)V
+PARCEL readInt ()I  <- 
+  if-lez @00bd
+CALL android.util.ArraySet.<init>(I)V
+CALL android.content.Intent$CreatorTokenInfo.-$$Nest$fputmNestedIntentKeys(Landroid/content/Intent$CreatorTokenInfo;Landroid/util/ArraySet;)V
+  if-ge @00c9
+PARCEL readInt ()I  <- 
+PARCEL readString8 ()Ljava/lang/String;  <- 
+PARCEL readInt ()I  <- 
+CALL android.content.Intent$CreatorTokenInfo.-$$Nest$fgetmNestedIntentKeys(Landroid/content/Intent$CreatorTokenInfo;)Landroid/util/ArraySet;
+CALL android.content.Intent$NestedIntentKey.<init>(ILjava/lang/String;ILandroid/content/Intent-IA;)V
+CALL android.util.ArraySet.append(Ljava/lang/Object;)V
+  goto @00e7
+  return-void @00e8
+
+== android/content/Intent.writeToParcel(Landroid/os/Parcel;I)V
+PARCEL writeString8 (Ljava/lang/String;)V  <- mAction:String
+CALL android.net.Uri.writeToParcel(Landroid/os/Parcel;Landroid/net/Uri;)V
+PARCEL writeString8 (Ljava/lang/String;)V  <- mType:String
+PARCEL writeString8 (Ljava/lang/String;)V  <- mIdentifier:String
+PARCEL writeInt (I)V  <- mFlags:I
+PARCEL writeInt (I)V  <- mExtendedFlags:I
+PARCEL writeString8 (Ljava/lang/String;)V  <- mPackage:String
+CALL android.content.ComponentName.writeToParcel(Landroid/content/ComponentName;Landroid/os/Parcel;)V
+  if-eqz @002c
+PARCEL writeInt (I)V  <- #1
+CALL android.graphics.Rect.writeToParcel(Landroid/os/Parcel;I)V
+  goto @0036
+PARCEL writeInt (I)V  <- #0
+  if-eqz @003c
+CALL android.util.ArraySet.size()I
+PARCEL writeInt (I)V  <- (result)
+  if-ge @0046
+CALL android.util.ArraySet.valueAt(I)Ljava/lang/Object;
+PARCEL writeString8 (Ljava/lang/String;)V  <- (result)
+  goto @0055
+PARCEL writeInt (I)V  <- #0
+  if-eqz @005b
+PARCEL writeInt (I)V  <- #1
+CALL android.content.Intent.writeToParcel(Landroid/os/Parcel;I)V
+  goto @0065
+PARCEL writeInt (I)V  <- #0
+  if-eqz @006b
+PARCEL writeInt (I)V  <- #1
+CALL android.content.ClipData.writeToParcel(Landroid/os/Parcel;I)V
+  goto @0075
+PARCEL writeInt (I)V  <- #0
+PARCEL writeInt (I)V  <- mContentUserHint:I
+PARCEL writeBundle (Landroid/os/Bundle;)V  <- mExtras:Bundle
+  if-eqz @0085
+PARCEL writeInt (I)V  <- #1
+CALL android.content.Intent.writeToParcel(Landroid/os/Parcel;I)V
+  goto @008f
+PARCEL writeInt (I)V  <- #0
+CALL com.android.internal.hidden_from_bootclasspath.android.security.Flags.preventIntentRedirect()Z
+  if-eqz @0097
+  if-nez @009b
+PARCEL writeInt (I)V  <- #0
+  return-void @00a0
+PARCEL writeInt (I)V  <- #1
+CALL android.content.Intent$CreatorTokenInfo.-$$Nest$fgetmCreatorToken(Landroid/content/Intent$CreatorTokenInfo;)Landroid/os/IBinder;
+PARCEL writeStrongBinder (Landroid/os/IBinder;)V  <- (result)
+CALL android.content.Intent$CreatorTokenInfo.-$$Nest$fgetmNestedIntentKeys(Landroid/content/Intent$CreatorTokenInfo;)Landroid/util/ArraySet;
+  if-eqz @00b3
+CALL android.content.Intent$CreatorTokenInfo.-$$Nest$fgetmNestedIntentKeys(Landroid/content/Intent$CreatorTokenInfo;)Landroid/util/ArraySet;
+CALL android.util.ArraySet.size()I
+PARCEL writeInt (I)V  <- (result)
+  if-ge @00c2
+CALL android.content.Intent$CreatorTokenInfo.-$$Nest$fgetmNestedIntentKeys(Landroid/content/Intent$CreatorTokenInfo;)Landroid/util/ArraySet;
+CALL android.util.ArraySet.valueAt(I)Ljava/lang/Object;
+CALL android.content.Intent$NestedIntentKey.-$$Nest$fgetmType(Landroid/content/Intent$NestedIntentKey;)I
+PARCEL writeInt (I)V  <- (result)
+CALL android.content.Intent$NestedIntentKey.-$$Nest$fgetmKey(Landroid/content/Intent$NestedIntentKey;)Ljava/lang/String;
+PARCEL writeString8 (Ljava/lang/String;)V  <- (result)
+CALL android.content.Intent$NestedIntentKey.-$$Nest$fgetmIndex(Landroid/content/Intent$NestedIntentKey;)I
+PARCEL writeInt (I)V  <- (result)
+  goto @00e7
+PARCEL writeInt (I)V  <- #0
+  return-void @00eb
+

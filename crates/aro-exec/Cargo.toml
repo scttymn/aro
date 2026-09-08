@@ -1,0 +1,21 @@
+[package]
+name = "aro-exec"
+description = "Process host: runs an Android app as a native user-space process"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+nix.workspace = true
+libc.workspace = true
+aro-props = { path = "../aro-props" }
+
+[lib]
+name = "aro_exec"
+path = "src/lib.rs"
+
+[[bin]]
+name = "aro-exec"
+path = "src/main.rs"

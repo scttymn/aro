@@ -1,0 +1,419 @@
+// Copyright 2022 Jeff Kim <hiking90@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
+/*
+ * Copyright (C) 2021 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+//! Generic container for parcelable objects.
+//!
+//! This module provides `ParcelableHolder`, a type-erased container that can hold
+//! any parcelable object. It's primarily used for AIDL union types and other
+//! scenarios where the specific parcelable type is not known at compile time.
+
+use crate::binder::Stability;
+use crate::error::{Result, StatusCode};
+use crate::{
+    Deserialize, Parcel, Parcelable, ParcelableMetadata, Serialize, NON_NULL_PARCELABLE_FLAG,
+    NULL_PARCELABLE_FLAG,
+};
+
+use std::any::Any;
+use std::sync::{Arc, Mutex};
+
+trait AnyParcelable: Parcelable + std::fmt::Debug + Send + Sync + 'static {
+    // Upcast to `dyn Any` so the holder can `Arc::downcast` back to the
+    // concrete parcelable type in `get_parcelable`. `Arc<Self>` is an
+    // object-safe receiver, so this works through the trait object.
+    fn into_any_arc(self: Arc<Self>) -> Arc<dyn Any + Send + Sync>;
+}
+impl<T: Parcelable + std::fmt::Debug + Send + Sync + 'static> AnyParcelable for T {
+    fn into_any_arc(self: Arc<Self>) -> Arc<dyn Any + Send + Sync> {
+        self
+    }
+}
+
+#[derive(Debug)]
+enum ParcelableHolderData {
+    Empty,
+    Parcelable {
+        parcelable: Arc<dyn AnyParcelable>,
+        name: String,
+    },
+    Parcel(Parcel),
+}
+
+/// A type-erased container for any parcelable object.
+///
+/// `ParcelableHolder` can store any type implementing `Parcelable`, allowing
+/// for runtime polymorphism over parcelable types. This is primarily used
+/// for AIDL union types and generic parcelable handling.
+///
+/// Note: `ParcelableHolder` is currently not thread-safe (neither `Send` nor `Sync`)
+/// due to its internal `Parcel` which is not thread-safe.
+#[derive(Debug)]
+pub struct ParcelableHolder {
+    // This is a `Mutex` because of `get_parcelable`
+    // which takes `&self` for consistency with C++.
+    // We could make `get_parcelable` take a `&mut self`
+    // and get rid of the `Mutex` here for a performance
+    // improvement, but then callers would require a mutable
+    // `ParcelableHolder` even for that getter method.
+    data: Mutex<ParcelableHolderData>,
+    stability: Stability,
+}
+
+impl Default for ParcelableHolder {
+    fn default() -> Self {
+        Self::new(Stability::Local)
+    }
+}
+
+impl ParcelableHolder {
+    /// Construct a new `ParcelableHolder` with the given stability.
+    pub fn new(stability: Stability) -> Self {
+        Self {
+            data: Mutex::new(ParcelableHolderData::Empty),
+            stability,
+        }
+    }
+
+    /// Reset the contents of this `ParcelableHolder`.
+    ///
+    /// Note that this method does not reset the stability,
+    /// only the contents.
+    pub fn reset(&mut self) {
+        *self
+            .data
+            .get_mut()
+            .expect("Parcelable holder lock poisoned") = ParcelableHolderData::Empty;
+        // We could also clear stability here, but C++ doesn't
+    }
+
+    /// Set the parcelable contained in this `ParcelableHolder`.
+    pub fn set_parcelable<T>(&mut self, p: Arc<T>) -> Result<()>
+    where
+        T: Any + Parcelable + ParcelableMetadata + std::fmt::Debug + Send + Sync,
+    {
+        if !p.stability().includes(self.stability) {
+            log::error!(
+                "ParcelableHolder::set_parcelable: parcelable stability {:?} does not include holder stability {:?}",
+                p.stability(),
+                self.stability
+            );
+            return Err(StatusCode::BadValue);
+        }
+
+        *self
+            .data
+            .get_mut()
+            .expect("Parcelable holder lock poisoned") = ParcelableHolderData::Parcelable {
+            parcelable: p,
+            name: T::descriptor().into(),
+        };
+
+        Ok(())
+    }
+
+    /// Retrieve the parcelable stored in this `ParcelableHolder`.
+    ///
+    /// This method attempts to retrieve the parcelable inside
+    /// the current object as a parcelable of type `T`.
+    /// The object is validated against `T` by checking that
+    /// its parcelable descriptor matches the one returned
+    /// by `T::descriptor()`.
+    ///
+    /// Returns one of the following:
+    /// * `Err(_)` in case of error
+    /// * `Ok(None)` if the holder is empty or the descriptor does not match
+    /// * `Ok(Some(_))` if the object holds a parcelable of type `T`
+    ///   with the correct descriptor
+    pub fn get_parcelable<T>(&self) -> Result<Option<Arc<T>>>
+    where
+        T: Any + Parcelable + ParcelableMetadata + Default + std::fmt::Debug + Send + Sync,
+    {
+        let parcelable_desc = T::descriptor();
+        let mut data = self.data.lock().expect("Parcelable holder lock poisoned");
+        match *data {
+            ParcelableHolderData::Empty => Ok(None),
+            ParcelableHolderData::Parcelable {
+                ref parcelable,
+                ref name,
+            } => {
+                if name != parcelable_desc {
+                    log::error!(
+                        "ParcelableHolder::get_parcelable: parcelable descriptor mismatch: {name:?} != {parcelable_desc:?}");
+                    return Err(StatusCode::BadValue);
+                }
+
+                match Arc::clone(parcelable).into_any_arc().downcast::<T>() {
+                    Err(_) => {
+                        log::error!("ParcelableHolder::get_parcelable: parcelable type mismatch: {parcelable:?} != {parcelable_desc:?}");
+                        Err(StatusCode::BadValue)
+                    }
+                    Ok(x) => Ok(Some(x)),
+                }
+            }
+            ParcelableHolderData::Parcel(ref mut parcel) => {
+                // Safety: 0 should always be a valid position.
+                parcel.set_data_position(0);
+
+                let name: String = parcel.read()?;
+                if name != parcelable_desc {
+                    return Ok(None);
+                }
+
+                let mut parcelable = T::default();
+                parcelable.read_from_parcel(parcel)?;
+
+                let parcelable = Arc::new(parcelable);
+                let result = Arc::clone(&parcelable);
+                *data = ParcelableHolderData::Parcelable { parcelable, name };
+
+                Ok(Some(result))
+            }
+        }
+    }
+
+    /// Return the stability value of this object.
+    pub fn get_stability(&self) -> Stability {
+        self.stability
+    }
+}
+
+impl Serialize for ParcelableHolder {
+    fn serialize(&self, parcel: &mut Parcel) -> Result<()> {
+        parcel.write(&NON_NULL_PARCELABLE_FLAG)?;
+        self.write_to_parcel(parcel)
+    }
+}
+
+impl Deserialize for ParcelableHolder {
+    fn deserialize(parcel: &mut Parcel) -> Result<Self> {
+        let status: i32 = parcel.read()?;
+        if status == NULL_PARCELABLE_FLAG {
+            log::error!("ParcelableHolder::deserialize: unexpected null");
+            Err(StatusCode::UnexpectedNull)
+        } else if status == NON_NULL_PARCELABLE_FLAG {
+            let mut parcelable = ParcelableHolder::default();
+            parcelable.read_from_parcel(parcel)?;
+            Ok(parcelable)
+        } else {
+            Err(StatusCode::UnexpectedNull)
+        }
+    }
+
+    /// Read ONTO `self`, preserving its already-set stability. Plain
+    /// `deserialize()` constructs a fresh `Local` holder, which then rejects a
+    /// `@VintfStability` wire stability — losing the level a generated
+    /// parcelable's `Default` assigned to a holder field. Generated
+    /// `read_from_parcel` reads holder fields via `read_onto` so this override
+    /// runs; mirrors AOSP's `field.readFromParcel(parcel)`.
+    fn deserialize_from(&mut self, parcel: &mut Parcel) -> Result<()> {
+        let status: i32 = parcel.read()?;
+        if status == NULL_PARCELABLE_FLAG {
+            log::error!("ParcelableHolder::deserialize_from: unexpected null");
+            Err(StatusCode::UnexpectedNull)
+        } else if status == NON_NULL_PARCELABLE_FLAG {
+            self.read_from_parcel(parcel)
+        } else {
+            Err(StatusCode::UnexpectedNull)
+        }
+    }
+}
+
+/// Encode a holder's stability as AOSP's `Parcelable::Stability` enum
+/// (`STABILITY_LOCAL = 0`, `STABILITY_VINTF = 1`).
+///
+/// This is a *different* wire value from the binder-object
+/// `internal::Stability::Level` bitmask (0/3/12/63 via `From<Stability> for
+/// i32`) used on the `writeStrongBinder` path, and it is version-independent:
+/// `frameworks/native/libs/binder/ParcelableHolder.cpp` writes
+/// `writeInt32(static_cast<int32_t>(getStability()))` unchanged on every
+/// Android version (verified byte-identical between android-12 and android-16),
+/// with no `Category` repr or Android-12 `0x0c000000` adjustment. The AIDL
+/// `@VintfStability` annotation maps a holder field to `STABILITY_VINTF`
+/// (`system/tools/aidl` `generate_cpp.cpp`); everything else is
+/// `STABILITY_LOCAL`. Reusing the binder-object encoding here put 63 (and
+/// `0x0c00003f` on Android 12) on the wire where a real libbinder peer expects
+/// 1, so any `@VintfStability` holder field was rejected with `BAD_VALUE`.
+fn parcelable_stability_repr(stability: Stability) -> i32 {
+    match stability {
+        Stability::Vintf => 1, // STABILITY_VINTF
+        _ => 0,                // STABILITY_LOCAL
+    }
+}
+
+impl Parcelable for ParcelableHolder {
+    fn write_to_parcel(&self, parcel: &mut Parcel) -> Result<()> {
+        let stability = parcelable_stability_repr(self.stability);
+        parcel.write(&stability)?;
+
+        let mut data = self.data.lock().expect("Parcelable holder lock poisoned");
+        match *data {
+            ParcelableHolderData::Empty => parcel.write(&0i32),
+            ParcelableHolderData::Parcelable {
+                ref parcelable,
+                ref name,
+            } => {
+                let length_start = parcel.data_position();
+                parcel.write(&0i32)?;
+
+                let data_start = parcel.data_position();
+                parcel.write(name)?;
+                parcelable.write_to_parcel(parcel)?;
+
+                let end = parcel.data_position();
+                // Safety: we got the position from `data_position`.
+                parcel.set_data_position(length_start);
+
+                assert!(end >= data_start);
+                parcel.write(&((end - data_start) as i32))?;
+                // Safety: we got the position from `data_position`.
+                parcel.set_data_position(end);
+
+                Ok(())
+            }
+            ParcelableHolderData::Parcel(ref mut p) => {
+                parcel.write(&(p.data_size() as i32))?;
+                parcel.append_all_from(p)
+            }
+        }
+    }
+
+    fn read_from_parcel(&mut self, parcel: &mut Parcel) -> Result<()> {
+        let wire_stability: i32 = parcel.read()?;
+        let local_stability = parcelable_stability_repr(self.stability);
+        if local_stability != wire_stability {
+            log::error!(
+                "ParcelableHolder::read_from_parcel: parcelable stability mismatch: {:?} != {:?}",
+                self.stability,
+                wire_stability
+            );
+
+            return Err(StatusCode::BadValue);
+        }
+
+        let data_size: i32 = parcel.read()?;
+        if data_size < 0 {
+            // C++ returns BAD_VALUE here,
+            // while Java returns ILLEGAL_ARGUMENT
+            return Err(StatusCode::BadValue);
+        }
+        if data_size == 0 {
+            *self
+                .data
+                .get_mut()
+                .expect("Parcelable holder lock poisoned") = ParcelableHolderData::Empty;
+            return Ok(());
+        }
+
+        // TODO: C++ ParcelableHolder accepts sizes up to SIZE_MAX here, but we
+        // only go up to i32::MAX because that's what our API uses everywhere
+        let data_start: usize = parcel.data_position();
+        let data_end: usize = data_start
+            .checked_add(data_size as usize)
+            .ok_or(StatusCode::BadValue)?;
+
+        let mut new_parcel = Parcel::new();
+        new_parcel.append_from(parcel, data_start, data_size as usize)?;
+        *self
+            .data
+            .get_mut()
+            .expect("Parcelable holder lock poisoned") = ParcelableHolderData::Parcel(new_parcel);
+
+        // Safety: `append_from` checks if `data_size` overflows
+        // `parcel` and returns `BAD_VALUE` if that happens. We also
+        // explicitly check for negative and zero `data_size` above,
+        // so `data_end` is guaranteed to be greater than `data_start`.
+        parcel.set_data_position(data_end);
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn holder_serializes_parcelable_stability_not_binder_level_bitmask() {
+        // A `ParcelableHolder` writes AOSP's `Parcelable::Stability` enum
+        // (`STABILITY_LOCAL = 0`, `STABILITY_VINTF = 1`), NOT the binder-object
+        // `internal::Stability::Level` bitmask (0/3/12/63). A `@VintfStability`
+        // holder therefore puts `1` on the wire; a real libbinder peer rejects
+        // any other value (the old 63, or `0x0c00003f` on Android 12) with
+        // BAD_VALUE. Golden values verified against android-12 and android-16
+        // `frameworks/native/libs/binder/ParcelableHolder.cpp` + `Parcelable.h`
+        // and `system/tools/aidl` `generate_cpp.cpp` (vintf holder field init).
+        //
+        // This cannot be caught by rsbinder<->rsbinder round trips: both ends
+        // share the same encoding, so a wrong-but-symmetric value always
+        // agrees. Only a fixed golden byte (or real-libbinder interop) detects
+        // it — hence the explicit `== 1` / `== 0` assertions below.
+        let vintf = ParcelableHolder::new(Stability::Vintf);
+        let mut vp = Parcel::new();
+        vintf.write_to_parcel(&mut vp).unwrap();
+        vp.set_data_position(0);
+        let vintf_wire: i32 = vp.read().unwrap();
+        assert_eq!(
+            vintf_wire, 1,
+            "Vintf holder must serialize as STABILITY_VINTF (1)"
+        );
+
+        let local = ParcelableHolder::default();
+        let mut lp = Parcel::new();
+        local.write_to_parcel(&mut lp).unwrap();
+        lp.set_data_position(0);
+        let local_wire: i32 = lp.read().unwrap();
+        assert_eq!(
+            local_wire, 0,
+            "Local holder must serialize as STABILITY_LOCAL (0)"
+        );
+
+        // Round-trip back into a same-stability holder accepts it.
+        vp.set_data_position(0);
+        let mut dst = ParcelableHolder::new(Stability::Vintf);
+        dst.read_from_parcel(&mut vp).unwrap();
+
+        // The stability-mismatch guard still holds: a fresh Local holder must
+        // reject a Vintf (1) wire value with BadValue.
+        vp.set_data_position(0);
+        let mut local_dst = ParcelableHolder::default();
+        assert!(matches!(
+            local_dst.read_from_parcel(&mut vp),
+            Err(StatusCode::BadValue)
+        ));
+    }
+
+    /// `ParcelableHolder` is non-nullable: only `NON_NULL_PARCELABLE_FLAG`
+    /// (`1`) is accepted. Null (`0`) and any other sentinel are rejected as
+    /// `UnexpectedNull`, never silently treated as present.
+    #[test]
+    fn holder_rejects_null_and_garbage_sentinels() {
+        for status in [NULL_PARCELABLE_FLAG, 2, -1] {
+            let mut p = Parcel::new();
+            p.write(&status).unwrap();
+            p.set_data_position(0);
+            assert!(
+                matches!(
+                    ParcelableHolder::deserialize(&mut p),
+                    Err(StatusCode::UnexpectedNull)
+                ),
+                "status {status} must be rejected as UnexpectedNull",
+            );
+        }
+    }
+}
