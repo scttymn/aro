@@ -58,6 +58,10 @@ enum Cmd {
         #[arg(long)]
         url: Option<String>,
     },
+    /// Inbound intent bridge: open a URI or host file in the matching ARO app
+    Open {
+        uri: String,
+    },
 }
 
 fn main() -> Result<()> {
@@ -66,6 +70,9 @@ fn main() -> Result<()> {
     // A desktop-entry request only writes host files; it needs no session or image.
     if let Cmd::DesktopEntry { apk } = &cli.cmd {
         return write_desktop_entry(apk);
+    }
+    if let Cmd::Open { uri } = &cli.cmd {
+        return open_uri(uri);
     }
     let layout = Layout::default();
     if !layout.system.join("system/bin/app_process64").exists() {
@@ -271,7 +278,7 @@ fn main() -> Result<()> {
         Cmd::Shell => {
             cmd.arg("shell");
         }
-        Cmd::DesktopEntry { .. } => unreachable!("handled before session setup"),
+        Cmd::DesktopEntry { .. } | Cmd::Open { .. } => unreachable!("handled before session setup"),
         Cmd::App { apk, activity: main_activity, url } => {
             let apk = apk.canonicalize()?;
             let name = apk.file_name().unwrap().to_string_lossy().into_owned();
@@ -416,18 +423,24 @@ fn write_desktop_entry(apk: &std::path::Path) -> Result<()> {
     };
 
     // --- Visible launcher entry ---
-    // Use a human-readable name derived from the package.
-    let human_name = manifest.package
-        .rsplit('.')
-        .next()
-        .unwrap_or(&manifest.package)
-        .to_string();
-    // Capitalize first letter.
-    let human_name = {
-        let mut c = human_name.chars();
-        match c.next() {
-            Some(first) => first.to_uppercase().to_string() + c.as_str(),
-            None => human_name,
+    let human_name = match manifest.package.as_str() {
+        "com.android.calendar" => "Calendar".to_string(),
+        "com.android.deskclock" => "Clock".to_string(),
+        "com.android.gallery3d" => "Gallery".to_string(),
+        "com.android.music" => "Music".to_string(),
+        "com.android.camera2" => "Camera".to_string(),
+        "com.android.messaging" => "Messaging".to_string(),
+        "com.android.contacts" => "Contacts".to_string(),
+        "com.android.inputmethod.latin" => "Android Keyboard".to_string(),
+        "org.chromium.webview_shell" => "Android Browser".to_string(),
+        "net.sourceforge.opencamera" => "Open Camera".to_string(),
+        _ => {
+            let part = manifest.package.rsplit('.').next().unwrap_or(&manifest.package);
+            let mut c = part.chars();
+            match c.next() {
+                Some(first) => first.to_uppercase().to_string() + c.as_str(),
+                None => part.to_string(),
+            }
         }
     };
 
@@ -440,7 +453,7 @@ fn write_desktop_entry(apk: &std::path::Path) -> Result<()> {
          Icon={icon}\n\
          Terminal=false\n\
          Categories=Utility;\n\
-         StartupWMClass=aro-{pkg}\n",
+         StartupWMClass={pkg}\n",
         name = human_name,
         arod = arod.display(),
         apk = apk.display(),
@@ -453,13 +466,23 @@ fn write_desktop_entry(apk: &std::path::Path) -> Result<()> {
     println!("Installed launcher entry: {}", launcher_file.display());
 
     // --- Scheme handlers (deep links) ---
+    // Only register custom, non-standard schemes. Standard system schemes
+    // (http, https, file, content, mailto, etc.) belong to host applications
+    // and must NEVER be hijacked via xdg-mime.
     let mut schemes: Vec<String> = Vec::new();
     for a in &manifest.activities {
         for f in &a.filters {
             if f.actions.iter().any(|x| x == "android.intent.action.VIEW") {
                 for s in &f.schemes {
-                    if !schemes.contains(s) {
-                        schemes.push(s.clone());
+                    let s_clean = s.trim().to_ascii_lowercase();
+                    if s_clean.is_empty() {
+                        continue;
+                    }
+                    if matches!(s_clean.as_str(), "http" | "https" | "file" | "content" | "about" | "data" | "javascript" | "mailto" | "tel" | "geo") {
+                        continue;
+                    }
+                    if !schemes.contains(&s_clean) {
+                        schemes.push(s_clean);
                     }
                 }
             }
@@ -507,4 +530,55 @@ fn dirs_applications() -> Result<std::path::PathBuf> {
 fn dirs_icons() -> Result<std::path::PathBuf> {
     let base = std::env::var_os("XDG_DATA_HOME").map(std::path::PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/share"))).context("no HOME/XDG_DATA_HOME")?;
     Ok(base.join("icons/hicolor/128x128/apps"))
+}
+
+fn open_uri(uri_or_path: &str) -> Result<()> {
+    let uri = if !uri_or_path.contains("://") {
+        let abs = std::path::Path::new(uri_or_path).canonicalize().context("resolving path")?;
+        format!("file://{}", abs.display())
+    } else {
+        uri_or_path.to_string()
+    };
+
+    let layout = Layout::default();
+    let mut candidate_apks = Vec::new();
+    let product_apps = layout.system.join("system/product/app");
+    if let Ok(entries) = std::fs::read_dir(&product_apps) {
+        for entry in entries.flatten() {
+            if let Ok(subentries) = std::fs::read_dir(entry.path()) {
+                for sub in subentries.flatten() {
+                    if sub.path().extension().is_some_and(|e| e == "apk") {
+                        candidate_apks.push(sub.path());
+                    }
+                }
+            }
+        }
+    }
+    let tmp_dir = layout.data.join("local/tmp");
+    if let Ok(entries) = std::fs::read_dir(&tmp_dir) {
+        for entry in entries.flatten() {
+            if entry.path().extension().is_some_and(|e| e == "apk") {
+                candidate_apks.push(entry.path());
+            }
+        }
+    }
+
+    for apk in &candidate_apks {
+        if let Ok(manifest) = aro_apk::inspect(apk) {
+            let spec = services::registry::AppSpec::from_manifest(&manifest, "/dummy".into(), 10001);
+            if let Some(act) = services::activity::ActivityService::resolve(&spec, "android.intent.action.VIEW", Some(&uri)) {
+                log::info!("open: {} handles {uri} via {act}", manifest.package);
+                let arod = std::env::current_exe()?;
+                let status = std::process::Command::new(arod)
+                    .arg("app")
+                    .arg(apk)
+                    .arg("--url")
+                    .arg(&uri)
+                    .status()?;
+                std::process::exit(status.code().unwrap_or(0));
+            }
+        }
+    }
+
+    bail!("no installed ARO app handles {uri}");
 }

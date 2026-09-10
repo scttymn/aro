@@ -5,7 +5,7 @@ use crate::parcelables::{ActivityInfo, ApplicationInfo, ProviderInfo, SharedLibr
 use rsbinder::{Parcel, Result};
 use std::sync::Mutex;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct AppSpec {
     pub package: String,
     pub apk_in_ns: String,

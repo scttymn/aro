@@ -288,6 +288,12 @@ pub fn uri_scheme(uri: &str) -> Option<String> {
     uri.split_once(':').map(|(s, _)| s.to_ascii_lowercase())
 }
 
+/// Whether a URI scheme should be forwarded to the host (xdg-open) when not handled in-app.
+pub fn is_host_bridgeable_scheme(uri: &str) -> bool {
+    let scheme = uri_scheme(uri);
+    matches!(scheme.as_deref(), Some("http" | "https" | "mailto" | "tel" | "geo"))
+}
+
 pub fn infer_mime_type(uri: &str) -> Option<&'static str> {
     if uri.contains("/events/") {
         Some("vnd.android.cursor.item/event")
@@ -376,27 +382,6 @@ impl ActivityService {
     }
 
     pub fn start_activity_target(&self, target_intent: crate::pending_intent::Target) {
-        // --- Host intent bridge: open web/mail/phone/map links on the host ---
-        if target_intent.action.as_deref() == Some("android.intent.action.VIEW")
-            || target_intent.action.as_deref() == Some("android.intent.action.SENDTO")
-        {
-            if let Some(ref uri) = target_intent.data {
-                let scheme = uri.split_once(':').map(|(s, _)| s.to_ascii_lowercase());
-                if matches!(scheme.as_deref(), Some("http" | "https" | "mailto" | "tel" | "geo")) {
-                    log::info!("activity: host bridge -> xdg-open {uri:?}");
-                    let uri = uri.clone();
-                    std::thread::spawn(move || {
-                        match std::process::Command::new("xdg-open").arg(&uri).status() {
-                            Ok(s) => log::info!("activity: xdg-open exited {s}"),
-                            Err(e) => log::warn!("activity: xdg-open failed: {e}"),
-                        }
-                    });
-                    return;
-                }
-            }
-        }
-        // --- End host intent bridge ---
-
         let attached = self.attached.lock().unwrap().clone();
         let controller = self.client_controller.lock().unwrap().clone();
         let display = self.registry.display;
@@ -408,7 +393,18 @@ impl ActivityService {
             (Some(p), Some(c)) if p == spec.package => c,
             (Some(p), None) if p == spec.package => spec.main_activity.clone().unwrap_or_default(),
             (None, Some(c)) => c,
-            (Some(p), Some(_)) => {
+            (Some(p), _) => {
+                // If an app specifically targeted an external package with a web/external URL, route to host
+                if let Some(ref uri) = target_intent.data {
+                    if is_host_bridgeable_scheme(uri) {
+                        log::info!("activity: host bridge (target external package {p:?}) -> xdg-open {uri:?}");
+                        let uri = uri.clone();
+                        std::thread::spawn(move || {
+                            let _ = std::process::Command::new("xdg-open").arg(&uri).status();
+                        });
+                        return;
+                    }
+                }
                 log::warn!("activity: startActivity to another package {p:?} not supported yet");
                 return;
             }
@@ -424,6 +420,17 @@ impl ActivityService {
                         a
                     }
                     None => {
+                        // Host intent bridge: if no in-app activity handles the URL, open on host
+                        if let Some(ref uri) = target_intent.data {
+                            if is_host_bridgeable_scheme(uri) {
+                                log::info!("activity: host bridge (unhandled {act:?}) -> xdg-open {uri:?}");
+                                let uri = uri.clone();
+                                std::thread::spawn(move || {
+                                    let _ = std::process::Command::new("xdg-open").arg(&uri).status();
+                                });
+                                return;
+                            }
+                        }
                         log::warn!("activity: no activity matches implicit action {act:?}");
                         return;
                     }
@@ -953,6 +960,68 @@ impl ActivityService {
             }
             _ => Ok(false),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aro_apk::{ActivityDecl, IntentFilter};
+
+    #[test]
+    fn test_host_bridgeable_schemes() {
+        assert!(is_host_bridgeable_scheme("https://example.com"));
+        assert!(is_host_bridgeable_scheme("http://example.com/test?q=1"));
+        assert!(is_host_bridgeable_scheme("mailto:user@example.com"));
+        assert!(is_host_bridgeable_scheme("tel:+1234567890"));
+        assert!(is_host_bridgeable_scheme("geo:37.7749,-122.4194"));
+        assert!(!is_host_bridgeable_scheme("content://com.android.calendar/events/1"));
+        assert!(!is_host_bridgeable_scheme("file:///sdcard/Download/test.pdf"));
+        assert!(!is_host_bridgeable_scheme("custom://app/start"));
+    }
+
+    #[test]
+    fn test_resolve_browser_vs_unhandled() {
+        let browser_spec = AppSpec {
+            package: "com.android.browser".into(),
+            activities: vec![ActivityDecl {
+                name: "com.android.browser.BrowserActivity".into(),
+                filters: vec![IntentFilter {
+                    actions: vec!["android.intent.action.VIEW".into()],
+                    schemes: vec!["http".into(), "https".into()],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        let calendar_spec = AppSpec {
+            package: "com.android.calendar".into(),
+            activities: vec![ActivityDecl {
+                name: "com.android.calendar.AllInOneActivity".into(),
+                filters: vec![IntentFilter {
+                    actions: vec!["android.intent.action.VIEW".into()],
+                    schemes: vec!["content".into()],
+                    mime_types: vec!["time/epoch".into()],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        // Browser resolves http internally
+        let res = ActivityService::resolve(&browser_spec, "android.intent.action.VIEW", Some("https://example.com"));
+        assert_eq!(res.as_deref(), Some("com.android.browser.BrowserActivity"));
+
+        // Calendar does NOT resolve http internally (will trigger host bridge fallback)
+        let res = ActivityService::resolve(&calendar_spec, "android.intent.action.VIEW", Some("https://example.com"));
+        assert_eq!(res, None);
+
+        // Calendar resolves content://time/epoch internally
+        let res = ActivityService::resolve(&calendar_spec, "android.intent.action.VIEW", Some("content://com.android.calendar/time/12345"));
+        assert_eq!(res.as_deref(), Some("com.android.calendar.AllInOneActivity"));
     }
 }
 
