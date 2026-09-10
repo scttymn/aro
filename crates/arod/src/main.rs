@@ -391,13 +391,68 @@ fn prepare_vendor_dir(layout: &aro_exec::layout::Layout) -> anyhow::Result<Optio
 }
 
 
-/// Generate a freedesktop `.desktop` scheme handler for an app's deep-link
-/// URLs and register it, so `xdg-open <scheme>://...` (and links elsewhere on
-/// the desktop) route to `arod app <apk> --url`. The schemes come from the
-/// app's VIEW <intent-filter>s — nothing is hardcoded.
+/// Generate a freedesktop `.desktop` launcher entry for an app and optionally
+/// register its deep-link URL scheme handlers. The app appears in the desktop
+/// launcher (rofi, wofi, application menu) with its real icon.
 fn write_desktop_entry(apk: &std::path::Path) -> Result<()> {
     let apk = apk.canonicalize()?;
     let manifest = aro_apk::inspect(&apk)?;
+    let arod = std::env::current_exe()?;
+    let dir = dirs_applications()?;
+    std::fs::create_dir_all(&dir)?;
+
+    // --- Extract icon ---
+    let icon_name = format!("aro-{}", manifest.package);
+    let icon_ref: String = if let Some((bytes, ext)) = aro_apk::extract_icon(&apk) {
+        let icon_dir = dirs_icons()?;
+        std::fs::create_dir_all(&icon_dir)?;
+        let icon_path = icon_dir.join(format!("{icon_name}.{ext}"));
+        std::fs::write(&icon_path, &bytes)?;
+        log::info!("icon: wrote {}", icon_path.display());
+        icon_path.to_string_lossy().into_owned()
+    } else {
+        // Fallback: generic Android icon name; hope the theme has one.
+        "android".to_string()
+    };
+
+    // --- Visible launcher entry ---
+    // Use a human-readable name derived from the package.
+    let human_name = manifest.package
+        .rsplit('.')
+        .next()
+        .unwrap_or(&manifest.package)
+        .to_string();
+    // Capitalize first letter.
+    let human_name = {
+        let mut c = human_name.chars();
+        match c.next() {
+            Some(first) => first.to_uppercase().to_string() + c.as_str(),
+            None => human_name,
+        }
+    };
+
+    let launcher_entry = format!(
+        "[Desktop Entry]\n\
+         Type=Application\n\
+         Name={name}\n\
+         Comment=Android app via ARO\n\
+         Exec={arod} app {apk}\n\
+         Icon={icon}\n\
+         Terminal=false\n\
+         Categories=Utility;\n\
+         StartupWMClass=aro-{pkg}\n",
+        name = human_name,
+        arod = arod.display(),
+        apk = apk.display(),
+        icon = icon_ref,
+        pkg = manifest.package,
+    );
+    let launcher_file = dir.join(format!("aro-{}.desktop", manifest.package));
+    std::fs::write(&launcher_file, &launcher_entry)?;
+    log::info!("wrote {}", launcher_file.display());
+    println!("Installed launcher entry: {}", launcher_file.display());
+
+    // --- Scheme handlers (deep links) ---
     let mut schemes: Vec<String> = Vec::new();
     for a in &manifest.activities {
         for f in &a.filters {
@@ -410,38 +465,46 @@ fn write_desktop_entry(apk: &std::path::Path) -> Result<()> {
             }
         }
     }
-    if schemes.is_empty() {
-        bail!("{} declares no VIEW intent-filter with a data scheme; nothing to register", manifest.package);
-    }
-    let arod = std::env::current_exe()?;
-    let mimetypes: String = schemes.iter().map(|s| format!("x-scheme-handler/{s};")).collect();
-    let entry = format!(
-        "[Desktop Entry]\nType=Application\nName=ARO: {pkg}\nComment=Open {pkg} deep links via ARO\nExec={arod} app {apk} --url %u\nTerminal=false\nNoDisplay=true\nMimeType={mimetypes}\n",
-        pkg = manifest.package,
-        arod = arod.display(),
-        apk = apk.display(),
-    );
-    let dir = dirs_applications()?;
-    std::fs::create_dir_all(&dir)?;
-    let file = dir.join(format!("aro-{}.desktop", manifest.package));
-    std::fs::write(&file, entry)?;
-    log::info!("wrote {}", file.display());
-    // Refresh the desktop database and set this app as the handler for each scheme.
-    let _ = std::process::Command::new("update-desktop-database").arg(&dir).status();
-    let entry_name = format!("aro-{}.desktop", manifest.package);
-    for s in &schemes {
-        let st = std::process::Command::new("xdg-mime").args(["default", &entry_name, &format!("x-scheme-handler/{s}")]).status();
-        match st {
-            Ok(s2) if s2.success() => log::info!("registered scheme {s}:// -> {entry_name}"),
-            _ => log::warn!("could not set default handler for {s}:// (xdg-mime)"),
+    if !schemes.is_empty() {
+        let mimetypes: String = schemes.iter().map(|s| format!("x-scheme-handler/{s};")).collect();
+        let handler_entry = format!(
+            "[Desktop Entry]\n\
+             Type=Application\n\
+             Name=ARO: {pkg} (scheme handler)\n\
+             Comment=Open {pkg} deep links via ARO\n\
+             Exec={arod} app {apk} --url %u\n\
+             Terminal=false\n\
+             NoDisplay=true\n\
+             MimeType={mimetypes}\n",
+            pkg = manifest.package,
+            arod = arod.display(),
+            apk = apk.display(),
+        );
+        let handler_file = dir.join(format!("aro-{}-handler.desktop", manifest.package));
+        std::fs::write(&handler_file, &handler_entry)?;
+        log::info!("wrote {}", handler_file.display());
+        let _ = std::process::Command::new("update-desktop-database").arg(&dir).status();
+        let handler_name = handler_file.file_name().unwrap().to_string_lossy().into_owned();
+        for s in &schemes {
+            let st = std::process::Command::new("xdg-mime").args(["default", &handler_name, &format!("x-scheme-handler/{s}")]).status();
+            match st {
+                Ok(s2) if s2.success() => log::info!("registered scheme {s}:// -> {handler_name}"),
+                _ => log::warn!("could not set default handler for {s}:// (xdg-mime)"),
+            }
         }
+        println!("Registered schemes: {}", schemes.iter().map(|s| format!("{s}://")).collect::<Vec<_>>().join(" "));
     }
-    println!("Registered {} for: {}", manifest.package, schemes.iter().map(|s| format!("{s}://")).collect::<Vec<_>>().join(" "));
-    println!("Try:  xdg-open {}://hello/from-the-desktop", schemes[0]);
+
+    let _ = std::process::Command::new("update-desktop-database").arg(&dir).status();
     Ok(())
 }
 
 fn dirs_applications() -> Result<std::path::PathBuf> {
     let base = std::env::var_os("XDG_DATA_HOME").map(std::path::PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/share"))).context("no HOME/XDG_DATA_HOME")?;
     Ok(base.join("applications"))
+}
+
+fn dirs_icons() -> Result<std::path::PathBuf> {
+    let base = std::env::var_os("XDG_DATA_HOME").map(std::path::PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/share"))).context("no HOME/XDG_DATA_HOME")?;
+    Ok(base.join("icons/hicolor/128x128/apps"))
 }

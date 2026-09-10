@@ -376,6 +376,27 @@ impl ActivityService {
     }
 
     pub fn start_activity_target(&self, target_intent: crate::pending_intent::Target) {
+        // --- Host intent bridge: open web/mail/phone/map links on the host ---
+        if target_intent.action.as_deref() == Some("android.intent.action.VIEW")
+            || target_intent.action.as_deref() == Some("android.intent.action.SENDTO")
+        {
+            if let Some(ref uri) = target_intent.data {
+                let scheme = uri.split_once(':').map(|(s, _)| s.to_ascii_lowercase());
+                if matches!(scheme.as_deref(), Some("http" | "https" | "mailto" | "tel" | "geo")) {
+                    log::info!("activity: host bridge -> xdg-open {uri:?}");
+                    let uri = uri.clone();
+                    std::thread::spawn(move || {
+                        match std::process::Command::new("xdg-open").arg(&uri).status() {
+                            Ok(s) => log::info!("activity: xdg-open exited {s}"),
+                            Err(e) => log::warn!("activity: xdg-open failed: {e}"),
+                        }
+                    });
+                    return;
+                }
+            }
+        }
+        // --- End host intent bridge ---
+
         let attached = self.attached.lock().unwrap().clone();
         let controller = self.client_controller.lock().unwrap().clone();
         let display = self.registry.display;
