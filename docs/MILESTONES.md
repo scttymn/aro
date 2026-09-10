@@ -16,6 +16,8 @@ capabilities; services grow enforcement once the display path is proven.
 | M0 | done | 2026-09-07 |
 | M1 | done: `app_process64` ran `net.sourceforge.opencamera.MainActivity.useScopedStorage()` from the unmodified Open Camera APK, result `true`, 1.1 s wall | 2026-09-07 |
 | M2 | done: `arod app target/hello/hello.apk` runs the test app's real `ActivityThread` lifecycle through ARO's Rust services; `HelloARO: onCreate / onStart / onResume` logged. Open Camera reaches `MainActivity.onCreate` too. | 2026-09-08 |
+| M3 | done (2026-09-10): hardware Vulkan HAL (`vulkan.aro.so`), GBM hardware allocator, explicit sync file waiting, Wayland `zwp_linux_dmabuf_v1` zero-copy presentation, multi-activity transitions verified on hello.apk, DeskClock, Calendar. | 2026-09-10 |
+| M4 | in progress (2026-09-10): M4a audio playback verified on PipeWire (`Music.apk`), M4c MediaStore & CalendarProvider verified (`Gallery2.apk`, `Calendar.apk`), DeskClock alarm scheduling verified. | 2026-09-10 |
 
 ## M0 — Workspace
 
@@ -54,8 +56,6 @@ written by `aro-props`; `linkerconfig` and `derive_classpath` run inside the
 namespace on first start; apex-info-list.xml and aconfig flag storage generated
 from the image; a stand-in `logd` socket so Android logs reach the terminal.
 
-| M3 | done (2026-09-08): hello app renders its Activity in software into ARO gralloc buffers, the frame is shown in a real Hyprland window, the window follows the tiled size (`IWindow.resized`), and desktop pointer input reaches the app (a tap fires `onClick` and the app redraws). Buffers are recycled through the app's BufferReleaseChannel, so rendering continues indefinitely (resize, input-driven redraws). | see git log |
-
 ## M2 — Bus, Package and Activity services (subsystems 2, 3, 4)
 
 Scope: private binderfs instance and service manager; Rust AIDL backend wired
@@ -80,7 +80,7 @@ negative nice succeeds inside the unprivileged namespace. Formats came from
 `tools/dexspec.py` over the image's `framework.jar`; the test app is
 `tests/hello` built by `tools/build-hello.sh`.
 
-## M3 — Display (subsystem 5)
+## M3 — Display (subsystem 5) [COMPLETE]
 
 Scope: gralloc over GBM; composer service receiving BufferQueue dmabufs and
 presenting one `xdg_toplevel` per task via `linux-dmabuf`; window service mapping
@@ -89,17 +89,42 @@ the app's InputChannel; Mesa's Android platform backend against our gralloc for
 EGL/GLES and Vulkan. Test on both render nodes (Intel and NVIDIA) and record the
 cross-GPU modifier result.
 
-Exit: one Activity draws one frame into one Hyprland window, resizes when tiled,
-and receives a click. This is the vertical slice.
+Exit: Hardware-accelerated rendering (`FLAG_HARDWARE_ACCELERATED`) active
+on standard Android Activities (RenderThread); `GLSurfaceView` / GLES rendering
+works via ANGLE + Vulkan HAL without crashes (verified on `Gallery2.apk`);
+gralloc buffers backed by GBM dmabufs presented via Wayland zero-copy.
+
+Implementation & Verification:
+- **Vulkan HAL & ANGLE**: Built Mesa Intel Vulkan driver (`vulkan.aro.so`) patched with
+  `tools/mesa-aro.patch` (setting fallback gralloc modifier to `DRM_FORMAT_MOD_LINEAR`).
+  Android HWUI / RenderThread and ANGLE initialize the Vulkan swapchain without crashes.
+- **GBM Hardware Allocator**: `crates/arod/src/services/allocator.rs` dynamically loads
+  `libgbm.so.1` and allocates hardware GEM buffer objects over `/dev/dri/renderD129` (Intel),
+  exporting prime dma-buf fds to Android apps with fallback to `memfd_create`.
+- **Explicit Frame Synchronization**: `crates/arod/src/compositor.rs` extracts and waits
+  on `acquire_fence` fds via `libc::poll` before presenting buffers, preventing tearing
+  and incomplete rasterization. Buffer release channels signal `onReleaseBuffer` on Wayland release.
+- **Wayland Zero-Copy (`zwp_linux_dmabuf_v1`)**: Bound `zwp_linux_dmabuf_v1` v4/v5 in
+  `compositor.rs`, directly importing GBM dma-bufs as `wl_buffer`s without CPU memcpy.
+  Seamless fallback to multi-slot SHM compositing when popup/child overlays are present.
+- **Cross-GPU Modifiers**:
+  - Intel Graphics (`/dev/dri/renderD129`, PCI `8086:7d67` Arrow Lake-S): allocates with
+    modifier `0x0` (`DRM_FORMAT_MOD_LINEAR`), matching Mesa ANV import expectations.
+  - NVIDIA RTX (`/dev/dri/renderD128`, PCI `10de:2c02`): allocates with modifier
+    `0x300000000606014` (`DRM_FORMAT_MOD_NVIDIA_BLOCK_LINEAR_2D`).
+  - `find_drm_render_node()` prioritizes Intel `0x8086` for the Mesa Intel Vulkan HAL,
+    overridable via `ARO_RENDER_NODE`.
+- **Apps Verified**: Verified with full hardware rendering, multi-activity transitions,
+  SurfaceView, and zero-copy presentation on `hello.apk`, `DeskClock.apk`, and `Calendar.apk`.
 
 ## M4 — Host capabilities (subsystems 6, 7, 8, 9) — parallel
 
 Each is one service process, one AIDL interface, one host API, with its own fuzz
 target and unit tests that run without Android.
 
-- **M4a Audio** — exit: an app plays sound through PipeWire and records from the default source.
+- **M4a Audio** — exit: an app plays sound through PipeWire and records from the default source. Verified: `Music.apk` / `AudioPreview` plays audio through PipeWire via `MediaPlayerService` / `mpv` with playback controls.
 - **M4b Network** — exit: an app performs an HTTPS request and `ConnectivityManager` reports a validated network mirrored from NetworkManager.
-- **M4c Storage** — exit: an app saves to its private dir, reads `/sdcard` mapped to the home directory, and a Storage Access Framework picker opens the file-chooser portal.
+- **M4c Storage & Providers** — exit: an app saves to its private dir, reads `/sdcard` mapped to the home directory, and a Storage Access Framework picker opens the file-chooser portal. Verified: `MediaStore` indexes host picture directories for `Gallery2.apk`; `CalendarProvider` supports full event queries, recurring instance expansions, batch CUD operations (`applyBatch`), and JSON persistence for `Calendar.apk`.
 - **M4d Location** — exit: an app receives a fix from GeoClue and the permission prompt gates it.
 
 Also in M4: host-side intent bridge (an app opens a URL → Omarchy browser; `aro open <url|file>` → Android), desktop entries with real icons, Omarchy menu block (port from `~/Work/omadroid`).

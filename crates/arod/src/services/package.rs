@@ -97,6 +97,15 @@ impl Service for PackageService {
                 reply.write_i32(COMPONENT_ENABLED_STATE_DEFAULT)?;
                 Ok(true)
             }
+            "resolveContentProvider" => {
+                let name: Option<String> = data.read()?;
+                let _flags = data.read_i64().or_else(|_| data.read_i32().map(|v| v as i64))?;
+                let _user = data.read_i32().unwrap_or(0);
+                log::info!("package: resolveContentProvider {name:?}");
+                ap::no_exception(reply)?;
+                ap::typed_none(reply)?;
+                Ok(true)
+            }
             "getActivityInfo" => {
                 // ComponentName typed: marker, then two UTF-16 strings
                 let present = data.read_i32()?;
@@ -114,7 +123,26 @@ impl Service for PackageService {
                 }
                 Ok(true)
             }
-            "getServiceInfo" | "getReceiverInfo" | "getProviderInfo" => {
+            "getProviderInfo" => {
+                let present = data.read_i32()?;
+                let (pkg, cls): (Option<String>, Option<String>) = if present != 0 { (data.read()?, data.read()?) } else { (None, None) };
+                let _flags = data.read_i64()?;
+                let _user = data.read_i32()?;
+                ap::no_exception(reply)?;
+                let info = pkg.as_deref().and_then(|p| self.registry.find(p)).and_then(|spec| {
+                    let decl = spec.providers.iter().find(|pr| Some(&pr.name) == cls.as_ref())?;
+                    Some(Registry::provider_info(&spec, decl))
+                });
+                match info {
+                    Some(pi) => ap::typed(reply, |p| pi.write(p))?,
+                    None => {
+                        log::warn!("package: getProviderInfo {pkg:?}/{cls:?}: unknown");
+                        ap::typed_none(reply)?
+                    }
+                }
+                Ok(true)
+            }
+            "getServiceInfo" | "getReceiverInfo" => {
                 ap::no_exception(reply)?;
                 ap::typed_none(reply)?;
                 Ok(true)

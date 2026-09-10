@@ -9,8 +9,9 @@
 use super::Service;
 use crate::aparcel as ap;
 use rsbinder::{Parcel, Result, SIBinder, TransactionCode};
+use std::collections::HashMap;
 use std::os::fd::{AsFd, AsRawFd, FromRawFd, OwnedFd};
-use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
 pub const PHYSICAL_DISPLAY_ID: i64 = 0x4a2b_0001; // arbitrary stable id for the one display
@@ -24,11 +25,21 @@ pub struct Layer {
     pub height: u32,
 }
 
+#[derive(Clone)]
+pub struct CachedBufferInfo {
+    pub gralloc_id: u64,
+    pub width: u32,
+    pub height: u32,
+    pub release_listener: Option<SIBinder>,
+    pub channel: Arc<Mutex<Option<OwnedFd>>>,
+}
+
 pub struct SurfaceFlinger {
     pub layers: Mutex<Vec<Arc<Layer>>>,
     next_layer_id: AtomicI32,
     pub width: u32,
     pub height: u32,
+    pub density_dpi: u32,
     /// The ISurfaceComposerClient binder handed to apps (set at publish time).
     pub client: Mutex<Option<SIBinder>>,
     /// Vsync period, from the host output's refresh rate.
@@ -36,11 +47,22 @@ pub struct SurfaceFlinger {
     /// The app's BufferReleaseChannel producer end (from layer_state_t.bufferReleaseChannel):
     /// BLASTBufferQueue's blocked dequeueBuffer polls the consumer end, so releases go here.
     pub release_channel: Arc<Mutex<Option<OwnedFd>>>,
+    pub cached_buffers: Mutex<HashMap<u64, CachedBufferInfo>>,
 }
 
 impl SurfaceFlinger {
-    pub fn new(width: u32, height: u32, frame_interval_ns: i64) -> Self {
-        SurfaceFlinger { layers: Mutex::new(Vec::new()), next_layer_id: AtomicI32::new(1), width, height, client: Mutex::new(None), frame_interval_ns, release_channel: Arc::new(Mutex::new(None)) }
+    pub fn new(width: u32, height: u32, density_dpi: u32, frame_interval_ns: i64) -> Self {
+        SurfaceFlinger {
+            layers: Mutex::new(Vec::new()),
+            next_layer_id: AtomicI32::new(1),
+            width,
+            height,
+            density_dpi,
+            client: Mutex::new(None),
+            frame_interval_ns,
+            release_channel: Arc::new(Mutex::new(None)),
+            cached_buffers: Mutex::new(HashMap::new()),
+        }
     }
 
     pub fn create_layer(&self, name: &str, width: u32, height: u32) -> Arc<Layer> {
@@ -73,6 +95,7 @@ pub static ISURFACECOMPOSER: &[(u32, &str)] = &[
     (34, "getCompositionPreference"),
     (38, "getProtectedContentSupport"),
     (39, "isWideColorDisplay"),
+    (73, "getMaxAcquiredBufferCount"),
 ];
 
 pub struct ComposerAidl {
@@ -122,6 +145,149 @@ impl Service for ComposerAidl {
                 reply.write(&if id == PHYSICAL_DISPLAY_ID { Some(self.display_token.clone()) } else { None })?;
                 Ok(true)
             }
+            "getStaticDisplayInfo" => {
+                let id = data.read_i64()?;
+                log::info!("sf: getStaticDisplayInfo id={id:#x}");
+                ap::no_exception(reply)?;
+                // StaticDisplayInfo (AIDL parcelable, non-null flag + 32 bytes)
+                reply.write_i32(1)?;  // non-null Parcelable
+                reply.write_i32(32)?; // parcelableSize (includes itself)
+                reply.write_i32(0)?;  // connectionType: 0 (Internal)
+                reply.write_i32(self.sf.density_dpi as i32)?; // densityDpi
+                reply.write_f32(self.sf.density_dpi as f32 / 160.0)?; // density
+                reply.write_i32(0)?;  // secure: false
+                reply.write_i32(0)?;  // deviceProductInfo: null optional
+                reply.write_i32(0)?;  // installOrientation: 0
+                reply.write_i32(0)?;  // deviceCategory: 0
+                Ok(true)
+            }
+            "getDynamicDisplayInfoFromId" | "getDynamicDisplayInfoFromToken" => {
+                log::info!("sf: {name}");
+                ap::no_exception(reply)?;
+                let w = self.sf.width as i32;
+                let h = self.sf.height as i32;
+                let dpi = self.sf.density_dpi as f32;
+                let fps = if self.sf.frame_interval_ns > 0 {
+                    (1_000_000_000.0 / self.sf.frame_interval_ns as f64) as f32
+                } else {
+                    60.0
+                };
+
+                // DynamicDisplayInfo (AIDL parcelable, non-null flag + 176 bytes)
+                reply.write_i32(1)?;   // non-null Parcelable
+                reply.write_i32(176)?; // parcelableSize
+
+                // 1. supportedDisplayModes: vector<DisplayMode>
+                reply.write_i32(1)?;  // count = 1
+                reply.write_i32(1)?;  // non-null DisplayMode element 0
+                // DisplayMode (80 bytes):
+                reply.write_i32(80)?; // DisplayMode.parcelableSize
+                reply.write_i32(0)?;  // id: 0
+                // resolution (gui.Size, non-null flag + 12 bytes):
+                reply.write_i32(1)?;  // non-null Size
+                reply.write_i32(12)?; // Size.parcelableSize
+                reply.write_i32(w)?;  // width
+                reply.write_i32(h)?;  // height
+                reply.write_f32(dpi)?; // xDpi
+                reply.write_f32(dpi)?; // yDpi
+                // supportedColorModes: vector<int32>
+                reply.write_i32(1)?;  // count: 1
+                reply.write_i32(0)?;  // COLOR_MODE_DEFAULT
+                reply.write_f32(fps)?; // peakRefreshRate
+                reply.write_f32(fps)?; // vsyncRate
+                reply.write_i64(1_000_000)?; // appVsyncOffsetNanos
+                reply.write_i64(1_000_000)?; // sfVsyncOffsetNanos
+                reply.write_i64(self.sf.frame_interval_ns)?; // presentationDeadlineNanos
+                reply.write_i32(0)?; // group: 0
+                reply.write_i32(0)?; // flags: 0
+
+                // 2. activeDisplayModeId
+                reply.write_i32(0)?;
+
+                // 3. renderFrameRate
+                reply.write_f32(fps)?;
+
+                // 4. supportedColorModes: vector<int32>
+                reply.write_i32(1)?;
+                reply.write_i32(0)?;
+
+                // 5. activeColorMode
+                reply.write_i32(0)?;
+
+                // 6. hdrCapabilities (gui.HdrCapabilities, non-null flag + 20 bytes)
+                reply.write_i32(1)?;  // non-null HdrCapabilities
+                reply.write_i32(20)?; // HdrCapabilities.parcelableSize
+                reply.write_i32(0)?;  // supportedHdrTypes: vector<int32> (count = 0)
+                reply.write_f32(500.0)?; // maxLuminance
+                reply.write_f32(500.0)?; // maxAverageLuminance
+                reply.write_f32(0.0)?;   // minLuminance
+
+                // 7. autoLowLatencyModeSupported
+                reply.write_i32(0)?;
+                // 8. gameContentTypeSupported
+                reply.write_i32(0)?;
+                // 9. preferredBootDisplayMode
+                reply.write_i32(0)?;
+                // 10. hasArrSupport
+                reply.write_i32(0)?;
+
+                // 11. frameRateCategoryRate (gui.FrameRateCategoryRate, non-null flag + 12 bytes)
+                reply.write_i32(1)?;  // non-null FrameRateCategoryRate
+                reply.write_i32(12)?; // FrameRateCategoryRate.parcelableSize
+                reply.write_f32(fps)?; // normal
+                reply.write_f32(fps)?; // high
+
+                // 12. supportedRefreshRates: vector<float>
+                reply.write_i32(1)?;  // count: 1
+                reply.write_f32(fps)?;
+
+                Ok(true)
+            }
+            "getCompositionPreference" => {
+                log::info!("sf: getCompositionPreference");
+                ap::no_exception(reply)?;
+                // CompositionPreference (AIDL parcelable, non-null flag + 20 bytes):
+                reply.write_i32(1)?;  // non-null Parcelable
+                reply.write_i32(20)?; // parcelableSize
+                reply.write_i32(142671872)?; // defaultDataspace: SRGB
+                reply.write_i32(1)?; // defaultPixelFormat: RGBA_8888
+                reply.write_i32(142671872)?; // wideColorDataspace: SRGB
+                reply.write_i32(1)?; // wideColorPixelFormat: RGBA_8888
+                Ok(true)
+            }
+            "getDisplayStats" => {
+                let _token: Option<SIBinder> = data.read().unwrap_or(None);
+                log::info!("sf: getDisplayStats");
+                ap::no_exception(reply)?;
+                // DisplayStatInfo (AIDL parcelable, non-null flag + 20 bytes):
+                reply.write_i32(1)?;  // non-null Parcelable
+                reply.write_i32(20)?; // parcelableSize
+                reply.write_i64(0)?;  // vsyncTime
+                reply.write_i64(self.sf.frame_interval_ns)?; // vsyncPeriod
+                Ok(true)
+            }
+            "getDisplayState" => {
+                let _token: Option<SIBinder> = data.read().unwrap_or(None);
+                log::info!("sf: getDisplayState");
+                ap::no_exception(reply)?;
+                // DisplayState (AIDL parcelable, non-null flag + 28 bytes):
+                reply.write_i32(1)?;  // non-null Parcelable
+                reply.write_i32(28)?; // parcelableSize
+                reply.write_i32(0)?;  // layerStack: 0
+                reply.write_i32(0)?;  // orientation: Rotation0 (0)
+                // layerStackSpaceRect (gui.Size, non-null flag + 12 bytes):
+                reply.write_i32(1)?;  // non-null Size
+                reply.write_i32(12)?; // Size.parcelableSize
+                reply.write_i32(self.sf.width as i32)?;
+                reply.write_i32(self.sf.height as i32)?;
+                Ok(true)
+            }
+            "getMaxAcquiredBufferCount" => {
+                log::info!("sf: getMaxAcquiredBufferCount");
+                ap::no_exception(reply)?;
+                reply.write_i32(2)?;
+                Ok(true)
+            }
             "getProtectedContentSupport" | "isWideColorDisplay" => {
                 ap::no_exception(reply)?;
                 ap::boolean(reply, false)?;
@@ -157,6 +323,7 @@ pub struct PostedBuffer {
     pub frame_number: u64,
     pub release_listener: Option<SIBinder>,
     pub channel: Arc<Mutex<Option<OwnedFd>>>,
+    pub acquire_fence: Option<Arc<OwnedFd>>,
 }
 
 const GB01: i32 = 0x4742_3031; // GraphicBuffer flatten magic 'GB01'
@@ -166,7 +333,9 @@ const GB_HEADER_INTS: usize = 13;
 /// Find the posted buffer in a transaction parcel. We locate our gralloc
 /// handle by its "AROB" magic and read the GraphicBuffer + BufferData around
 /// it (Parcel::write(Flattenable): [len][fdCount][data padded][fd objects]).
-fn parse_posted_buffer(data: &mut Parcel) -> Option<PostedBuffer> {
+/// If the GraphicBuffer was cached by BLASTBufferQueue, only its client_cache_t
+/// ID is serialized, so we identify it against known cached buffers.
+fn parse_posted_buffer(data: &mut Parcel, cached: &Mutex<HashMap<u64, CachedBufferInfo>>, default_channel: &Arc<Mutex<Option<OwnedFd>>>) -> Option<PostedBuffer> {
     let save = data.data_position();
     let bytes = data.aro_debug_bytes().0;
     let rd = |o: usize| -> i32 { i32::from_le_bytes([bytes[o], bytes[o + 1], bytes[o + 2], bytes[o + 3]]) };
@@ -179,37 +348,121 @@ fn parse_posted_buffer(data: &mut Parcel) -> Option<PostedBuffer> {
         }
         i += 4;
     }
-    let p = found?;
-    let h = p - GB_HEADER_INTS * 4; // GraphicBuffer flatten header
-    if rd(h) != GB01 {
-        log::warn!("sf: AROB handle without GB01 header ({:#x})", rd(h));
-        return None;
-    }
-    let (w, hgt) = (rd(h + 4) as u32, rd(h + 8) as u32);
-    let gb_id = ((rd(h + 28) as u32 as u64) << 32) | rd(h + 32) as u32 as u64;
-    let num_fds = rd(h + 40) as usize;
-    let num_ints = rd(h + 44) as usize;
-    let gralloc_id = rd(p + 36) as u32 as u64 | ((rd(p + 40) as u32 as u64) << 32);
-    // Flattenable framing: [len][fdCount] precede `h`; data is padded to 4, then fdCount objects.
-    let len = rd(h - 8) as usize;
-    let fd_count = rd(h - 4) as usize;
-    if len != (GB_HEADER_INTS + num_ints) * 4 || fd_count != num_fds {
-        log::warn!("sf: GraphicBuffer framing mismatch len={len} fds={fd_count} (ints={num_ints} numFds={num_fds})");
-    }
-    let mut pos = h + ((len + 3) & !3) + fd_count * FLAT_OBJ;
-    // BufferData continues: bool acquireFence [+ Flattenable], u64 frameNumber, binder releaseBufferListener.
-    data.set_data_position(pos);
-    let has_fence = data.read_i32().ok()? != 0;
-    if has_fence {
-        let flen = data.read_i32().ok()? as usize;
-        let ffds = data.read_i32().ok()? as usize;
-        pos = data.data_position() + ((flen + 3) & !3) + ffds * FLAT_OBJ;
+    if let Some(p) = found {
+        let h = p - GB_HEADER_INTS * 4; // GraphicBuffer flatten header
+        if rd(h) != GB01 {
+            log::warn!("sf: AROB handle without GB01 header ({:#x})", rd(h));
+            return None;
+        }
+        let (w, hgt) = (rd(h + 4) as u32, rd(h + 8) as u32);
+        let gb_id = ((rd(h + 28) as u32 as u64) << 32) | rd(h + 32) as u32 as u64;
+        let num_fds = rd(h + 40) as usize;
+        let num_ints = rd(h + 44) as usize;
+        let gralloc_id = rd(p + 36) as u32 as u64 | ((rd(p + 40) as u32 as u64) << 32);
+        // Flattenable framing: [len][fdCount] precede `h`; data is padded to 4, then fdCount objects.
+        let len = rd(h - 8) as usize;
+        let fd_count = rd(h - 4) as usize;
+        if len != (GB_HEADER_INTS + num_ints) * 4 || fd_count != num_fds {
+            log::warn!("sf: GraphicBuffer framing mismatch len={len} fds={fd_count} (ints={num_ints} numFds={num_fds})");
+        }
+        let mut pos = h + ((len + 3) & !3) + fd_count * FLAT_OBJ;
+        // BufferData continues: bool acquireFence [+ Flattenable], u64 frameNumber, binder releaseBufferListener.
         data.set_data_position(pos);
+        let has_fence = data.read_i32().ok()? != 0;
+        let mut acquire_fence = None;
+        if has_fence {
+            let flen = data.read_i32().ok()? as usize;
+            let ffds = data.read_i32().ok()? as usize;
+            let fpos = data.data_position() + ((flen + 3) & !3);
+            let (bytes, _) = data.aro_debug_bytes();
+            if ffds > 0 && fpos + FLAT_OBJ <= bytes.len() {
+                let obj_type = i32::from_le_bytes([bytes[fpos], bytes[fpos+1], bytes[fpos+2], bytes[fpos+3]]) as u32;
+                let raw_fd = i32::from_le_bytes([bytes[fpos+8], bytes[fpos+9], bytes[fpos+10], bytes[fpos+11]]);
+                log::info!("sf: acquire fence: flen={flen} ffds={ffds} obj_type={obj_type:#x} raw_fd={raw_fd}");
+                if obj_type == 0x6664_2a85 {
+                    let dup = unsafe { libc::fcntl(raw_fd, libc::F_DUPFD_CLOEXEC, 0) };
+                    if dup >= 0 {
+                        acquire_fence = Some(unsafe { OwnedFd::from_raw_fd(dup) });
+                    }
+                }
+            } else {
+                log::info!("sf: acquire fence without fd: flen={flen} ffds={ffds}");
+            }
+            pos = fpos + ffds * FLAT_OBJ;
+            data.set_data_position(pos);
+        } else {
+            log::info!("sf: no acquire fence");
+        }
+        let frame_number = data.read_u64().ok()?;
+        let release_listener: Option<SIBinder> = data.read().ok().flatten();
+        data.set_data_position(save);
+
+        let ch = Arc::new(Mutex::new(default_channel.lock().unwrap().as_ref().and_then(|fd| fd.try_clone().ok())));
+
+        // Cache the buffer descriptor so subsequent cached submissions can resolve it.
+        cached.lock().unwrap().insert(gb_id, CachedBufferInfo {
+            gralloc_id,
+            width: w,
+            height: hgt,
+            release_listener: release_listener.clone(),
+            channel: ch.clone(),
+        });
+
+        return Some(PostedBuffer {
+            gralloc_id,
+            width: w,
+            height: hgt,
+            gb_id,
+            frame_number,
+            release_listener,
+            channel: ch,
+            acquire_fence: acquire_fence.map(Arc::new),
+        });
     }
-    let frame_number = data.read_u64().ok()?;
-    let release_listener: Option<SIBinder> = data.read().ok().flatten();
-    data.set_data_position(save);
-    Some(PostedBuffer { gralloc_id, width: w, height: hgt, gb_id, frame_number, release_listener, channel: Arc::new(Mutex::new(None)) })
+
+    // GraphicBuffer is not serialized in full when cachedBuffer is used.
+    // Scan for any registered gb_id at the expected client_cache_t location:
+    // [u64 frame_number][flat_binder releaseBufferListener][flat_binder releaseBufferEndpoint][flat_binder cachedBuffer.token][u64 cachedBuffer.id].
+    let cache_lock = cached.lock().unwrap();
+    if !cache_lock.is_empty() {
+        for off in (92..bytes.len().saturating_sub(8)).step_by(4) {
+            let candidate_id = u64::from_le_bytes(bytes[off..off + 8].try_into().unwrap());
+            if let Some(info) = cache_lock.get(&candidate_id) {
+                let is_binder = |o: usize| -> bool {
+                    let t = rd(o) as u32;
+                    t == 0x7368_2a85 || t == 0x7362_2a85
+                };
+                if is_binder(off - 28) && is_binder(off - 56) && is_binder(off - 84) {
+                    let frame_number = u64::from_le_bytes(bytes[off - 92..off - 84].try_into().unwrap());
+                    if frame_number > 0 {
+                        let mut cached_fence = None;
+                        if off >= 92 + 24 && rd(off - 92 - 24) == 0x6664_2a85 {
+                            let raw_fd = rd(off - 92 - 16);
+                            let dup = unsafe { libc::fcntl(raw_fd, libc::F_DUPFD_CLOEXEC, 0) };
+                            if dup >= 0 {
+                                cached_fence = Some(Arc::new(unsafe { OwnedFd::from_raw_fd(dup) }));
+                            }
+                        }
+                        data.set_data_position(off - 84);
+                        let release_listener: Option<SIBinder> = data.read().ok().flatten().or_else(|| info.release_listener.clone());
+                        data.set_data_position(save);
+                        return Some(PostedBuffer {
+                            gralloc_id: info.gralloc_id,
+                            width: info.width,
+                            height: info.height,
+                            gb_id: candidate_id,
+                            frame_number,
+                            release_listener,
+                            channel: info.channel.clone(),
+                            acquire_fence: cached_fence,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    None
 }
 
 /// Look for a BufferReleaseChannel producer endpoint in a transaction: an fd
@@ -320,15 +573,29 @@ impl Service for ComposerLegacy {
                     log::info!("sf: buffer release channel from {name:?}");
                     *self.sf.release_channel.lock().unwrap() = Some(fd);
                 }
-                if let Some(mut pb) = parse_posted_buffer(data) {
-                    pb.channel = self.sf.release_channel.clone();
-                    log::info!("sf: setTransactionState #{n} posts ARO buffer {} ({}x{}) gb={:#x} frame={} release={}", pb.gralloc_id, pb.width, pb.height, pb.gb_id, pb.frame_number, pb.release_listener.is_some());
+                let (bytes, objs) = data.aro_debug_bytes();
+                if let Some(&first_obj) = objs.first() {
+                    let o = first_obj as usize;
+                    if o + 48 <= bytes.len() {
+                        let rd_i32 = |off: usize| i32::from_le_bytes([bytes[off], bytes[off+1], bytes[off+2], bytes[off+3]]);
+                        let rd_f32 = |off: usize| f32::from_le_bytes([bytes[off], bytes[off+1], bytes[off+2], bytes[off+3]]);
+                        let layer_id = rd_i32(o + 24);
+                        let what = u64::from_le_bytes(bytes[o+28..o+36].try_into().unwrap());
+                        let x = rd_f32(o + 36);
+                        let y = rd_f32(o + 40);
+                        let z = rd_i32(o + 44);
+                        log::info!("sf: setTransactionState #{n} header: layer_id={layer_id} what={what:#x} pos=({x},{y}) z={z}");
+                    }
+                }
+                if let Some(pb) = parse_posted_buffer(data, &self.sf.cached_buffers, &self.sf.release_channel) {
+                    log::info!("sf: setTransactionState #{n} posts ARO buffer {} ({}x{}) gb={:#x} frame={}", pb.gralloc_id, pb.width, pb.height, pb.gb_id, pb.frame_number);
                     match (&self.presenter, self.gralloc.buffers.lock().unwrap().get(&pb.gralloc_id).cloned()) {
                         (Some(p), Some(buf)) => p.present(buf, pb),
                         _ => release_buffer(&pb), // nothing to show it on: hand it straight back
                     }
                 } else {
-                    log::debug!("sf: setTransactionState #{n} ({} bytes, no buffer)", data.data_size());
+                    let bytes = data.aro_debug_bytes().0;
+                    log::debug!("sf: setTransactionState #{n} ({} bytes, no buffer)", bytes.len());
                 }
                 reply.write_i32(0)?; // status_t OK
                 Ok(true)
@@ -345,10 +612,27 @@ impl Service for ComposerLegacy {
 }
 
 /// android.gui.ISurfaceComposerClient (one per app connection).
+pub fn extract_window_tag(name: &str) -> String {
+    if let Some(start) = name.find('[') {
+        let rest = &name[start + 1..];
+        if let Some(end) = rest.find(']') {
+            return rest[..end].to_string();
+        }
+    }
+    let s = name.strip_prefix("VRI-").unwrap_or(name);
+    let after_slash = s.rsplit('/').next().unwrap_or(s);
+    if let Some((_, class_name)) = after_slash.rsplit_once('.') {
+        class_name.to_string()
+    } else {
+        after_slash.to_string()
+    }
+}
+
 pub static ISURFACECOMPOSERCLIENT: &[(u32, &str)] = &[(1, "createSurface"), (2, "clearLayerFrameStats"), (3, "getLayerFrameStats"), (4, "mirrorSurface"), (5, "mirrorDisplay"), (6, "getSchedulingPolicy")];
 
 pub struct ComposerClient {
     pub sf: Arc<SurfaceFlinger>,
+    pub host: Arc<Mutex<Option<Arc<crate::services::window_session::WindowHost>>>>,
 }
 
 impl Service for ComposerClient {
@@ -363,7 +647,16 @@ impl Service for ComposerClient {
                 let flags = data.read_i32()?;
                 let _parent: Option<SIBinder> = data.read().unwrap_or(None);
                 let layer = self.sf.create_layer(lname.as_deref().unwrap_or("?"), self.sf.width, self.sf.height);
-                log::info!("sf: createSurface {:?} flags={flags:#x} -> layer {}", lname, layer.id);
+                let tag = extract_window_tag(lname.as_deref().unwrap_or(""));
+                log::info!("sf: createSurface {:?} tag={tag:?} flags={flags:#x} -> layer {}", lname, layer.id);
+                if let Some(host) = self.host.lock().unwrap().as_ref() {
+                    let mut windows = host.windows.lock().unwrap();
+                    if let Some(w) = windows.iter_mut().rev().find(|w| w.tag.lock().unwrap().is_none()) {
+                        *w.tag.lock().unwrap() = Some(tag.clone());
+                        *w.surface_layer_id.lock().unwrap() = Some(layer.id);
+                        log::info!("window: assigned tag {tag:?} and surface layer {} to window layer {}", layer.id, w.layer.id);
+                    }
+                }
                 ap::no_exception(reply)?;
                 reply.write_i32(1)?; // writeParcelable non-null marker
                 // CreateSurfaceResult (structured parcelable): size, handle, layerId, layerName, transformHint
@@ -402,6 +695,8 @@ pub struct DisplayEventConnection {
     rate: Arc<AtomicI32>,
     counter: Arc<AtomicU32>,
     interval_ns: i64,
+    request_flag: Arc<AtomicBool>,
+    running: Arc<AtomicBool>,
 }
 
 const DISPLAY_EVENT_VSYNC: u32 = 0x7673_796e; // fourcc('v','s','y','n')
@@ -421,11 +716,63 @@ impl DisplayEventConnection {
         }
         use std::os::fd::FromRawFd;
         let (receive, send) = unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) };
-        Ok(DisplayEventConnection { receive, send: Arc::new(send), rate: Arc::new(AtomicI32::new(0)), counter: Arc::new(AtomicU32::new(0)), interval_ns })
+        let send = Arc::new(send);
+        let rate = Arc::new(AtomicI32::new(0));
+        let counter = Arc::new(AtomicU32::new(0));
+        let request_flag = Arc::new(AtomicBool::new(false));
+        let running = Arc::new(AtomicBool::new(true));
+
+        let send_clone = send.clone();
+        let rate_clone = rate.clone();
+        let counter_clone = counter.clone();
+        let request_clone = request_flag.clone();
+        let running_clone = running.clone();
+
+        let interval_dur = std::time::Duration::from_nanos(interval_ns as u64);
+        std::thread::Builder::new()
+            .name("sf-vsync".into())
+            .spawn(move || {
+                let mut next_tick = std::time::Instant::now() + interval_dur;
+                while running_clone.load(Ordering::Relaxed) {
+                    let now = std::time::Instant::now();
+                    if next_tick > now {
+                        std::thread::sleep(next_tick - now);
+                    }
+                    next_tick += interval_dur;
+                    let now_after = std::time::Instant::now();
+                    if next_tick < now_after {
+                        next_tick = now_after + interval_dur;
+                    }
+
+                    let c = counter_clone.fetch_add(1, Ordering::SeqCst) + 1;
+                    let should_send = rate_clone.load(Ordering::SeqCst) > 0
+                        || request_clone.swap(false, Ordering::SeqCst);
+                    if should_send {
+                        let rc = Self::write_vsync(&send_clone, c, interval_ns);
+                        if rc < 0 {
+                            let err = std::io::Error::last_os_error();
+                            if err.raw_os_error() == Some(libc::EPIPE) || err.raw_os_error() == Some(libc::ECONNRESET) {
+                                break;
+                            }
+                        }
+                    }
+                }
+            })
+            .ok();
+
+        Ok(DisplayEventConnection {
+            receive,
+            send,
+            rate,
+            counter,
+            interval_ns,
+            request_flag,
+            running,
+        })
     }
 
     /// One DisplayEventReceiver::Event of type VSYNC.
-    fn write_vsync(send: &OwnedFd, count: u32, interval: i64) {
+    fn write_vsync(send: &OwnedFd, count: u32, interval: i64) -> isize {
         let now = now_ns();
         let mut e = Vec::with_capacity(EVENT_SIZE);
         let push = |v: &mut Vec<u8>, b: &[u8]| v.extend_from_slice(b);
@@ -452,6 +799,7 @@ impl DisplayEventConnection {
         if rc < 0 {
             log::debug!("sf: vsync send failed: {}", std::io::Error::last_os_error());
         }
+        rc
     }
 
     fn write_vsync_event_data(&self, p: &mut Parcel) -> Result<()> {
@@ -464,6 +812,12 @@ impl DisplayEventConnection {
         p.write_i64(count as i64)?; // vsyncId
         p.write_i64(now + interval - 2_000_000)?; // deadline
         p.write_i64(now + 2 * interval) // expectedPresentationTime
+    }
+}
+
+impl Drop for DisplayEventConnection {
+    fn drop(&mut self) {
+        self.running.store(false, Ordering::Relaxed);
     }
 }
 
@@ -485,28 +839,12 @@ impl Service for DisplayEventConnection {
                 let rate = data.read_i32()?;
                 self.rate.store(rate, Ordering::SeqCst);
                 log::info!("sf: setVsyncRate {rate}");
-                if rate > 0 {
-                    // Continuous vsync until the rate is set back to 0.
-                    let (send, rate_flag, counter, interval) = (self.send.clone(), self.rate.clone(), self.counter.clone(), self.interval_ns);
-                    std::thread::spawn(move || {
-                        while rate_flag.load(Ordering::SeqCst) > 0 {
-                            std::thread::sleep(std::time::Duration::from_nanos(interval as u64));
-                            let c = counter.fetch_add(1, Ordering::SeqCst) + 1;
-                            Self::write_vsync(&send, c, interval);
-                        }
-                    });
-                }
                 ap::no_exception(reply)?;
                 Ok(true)
             }
             "requestNextVsync" => {
                 log::debug!("sf: DEC.requestNextVsync");
-                let (send, counter, interval) = (self.send.clone(), self.counter.clone(), self.interval_ns);
-                std::thread::spawn(move || {
-                    std::thread::sleep(std::time::Duration::from_nanos((interval / 2) as u64));
-                    let c = counter.fetch_add(1, Ordering::SeqCst) + 1;
-                    Self::write_vsync(&send, c, interval);
-                });
+                self.request_flag.store(true, Ordering::SeqCst);
                 Ok(true)
             }
             "getLatestVsyncEventData" => {

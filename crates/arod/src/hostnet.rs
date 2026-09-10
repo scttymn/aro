@@ -17,6 +17,7 @@ pub struct HostNet {
     pub metered: bool,
     pub transport: i32,
     pub dns: Vec<std::net::Ipv4Addr>,
+    #[allow(dead_code)]
     pub iface: Option<String>,
 }
 

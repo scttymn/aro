@@ -21,37 +21,28 @@ impl Service for ActivityTaskService {
                 reply.write(&self.client_controller.lock().unwrap().clone())?;
                 Ok(true)
             }
-            "startActivity" | "startActivityWithFeature" => {
+            "startActivity" | "startActivityWithFeature" | "startActivityAsUser" => {
                 // (IApplicationThread caller, String callingPackage, String callingFeatureId,
-                //  Intent intent, String resolvedType, IBinder resultTo, ...)
+                //  Intent intent, String resolvedType, IBinder resultTo, String resultWho, int requestCode, int flags, ...)
                 let _caller: Option<SIBinder> = data.read()?;
                 let _calling_pkg: Option<String> = data.read()?; // String16
                 let _feature: Option<String> = data.read()?;     // String16
                 if data.read_i32()? != 0 {
-                    // Intent body (see android.content.Intent.writeToParcel).
-                    let action = ap::read_string8(data)?;
-                    let uri_type = data.read_i32()?; // Uri.writeToParcel: 0 null, 1 StringUri
-                    let data_uri = match uri_type {
-                        0 => None,
-                        1 => ap::read_string8(data)?, // StringUri: uriString
-                        other => {
-                            log::warn!("activity_task: startActivity data Uri type {other} unsupported; treating as no data");
-                            None
-                        }
-                    };
-                    // Only the StringUri (or null) shapes keep the parcel aligned for the fields
-                    // below; for other shapes we still resolve on action alone.
-                    if uri_type == 0 || uri_type == 1 {
-                        let _type = ap::read_string8(data)?;
-                        let _ident = ap::read_string8(data)?;
-                        let _flags = data.read_i32()?;
-                        let _ext_flags = data.read_i32()?;
-                        let intent_pkg = ap::read_string8(data)?;
-                        let comp_pkg: Option<String> = data.read()?; // ComponentName: String16 package
-                        let comp_cls: Option<String> = if comp_pkg.is_some() { data.read()? } else { None };
-                        self.activity.start_activity(comp_pkg.or(intent_pkg), comp_cls, action, data_uri);
+                    let target = crate::pending_intent::read_intent_target(data)?;
+                    let _resolved_type: Option<String> = data.read().ok().flatten();
+                    let result_to: Option<SIBinder> = data.read().ok().flatten();
+                    let result_who: Option<String> = data.read().ok().flatten();
+                    let request_code: i32 = data.read_i32().unwrap_or(0);
+                    let _flags: i32 = data.read_i32().unwrap_or(0);
+
+                    log::info!("activity_task: startActivity action={:?} result_to={:?} req_code={request_code}", target.action, result_to.is_some());
+
+                    if target.action.as_deref() == Some("android.intent.action.OPEN_DOCUMENT")
+                        || target.action.as_deref() == Some("android.intent.action.GET_CONTENT")
+                    {
+                        self.activity.open_document(result_to, result_who, request_code);
                     } else {
-                        self.activity.start_activity(None, None, action, None);
+                        self.activity.start_activity_target(target);
                     }
                 }
                 ap::no_exception(reply)?;
@@ -69,7 +60,9 @@ impl Service for ActivityTaskService {
 }
 
 /// android.app.IActivityClientController: the app reports lifecycle here.
-pub struct ActivityClientController;
+pub struct ActivityClientController {
+    pub activity: std::sync::Arc<super::activity::ActivityService>,
+}
 
 impl Service for ActivityClientController {
     const DESCRIPTOR: &'static str = "android.app.IActivityClientController";
@@ -80,6 +73,11 @@ impl Service for ActivityClientController {
             "activityIdle" | "activityResumed" | "activityPaused" | "activityStopped" | "activityDestroyed" | "activityTopResumedStateLost" | "activityRefreshed" | "activityLocalRelaunch" | "activityRelaunched" => {
                 let _token: Option<SIBinder> = data.read()?;
                 log::info!("activity-client: {name}");
+                if name == "activityDestroyed" {
+                    let mut stack = self.activity.activity_stack.lock().unwrap();
+                    let popped = stack.pop();
+                    log::info!("activity-client: activityDestroyed popped {popped:?}, remaining stack: {stack:?}");
+                }
                 ap::no_exception(reply).ok();
                 Ok(true)
             }
@@ -111,6 +109,36 @@ impl Service for ActivityClientController {
             "getActivityCallerToken" | "getActivityCallerPackage" | "getLaunchedFromPackage" | "getCallingPackage" => {
                 ap::no_exception(reply)?;
                 ap::string16(reply, None)?;
+                Ok(true)
+            }
+            "finishActivity" => {
+                let token: Option<SIBinder> = data.read().ok().flatten();
+                let result_code = data.read_i32().unwrap_or(0);
+                let has_intent = data.read_i32().unwrap_or(0);
+                if has_intent != 0 {
+                    let _action = ap::read_string8(data).ok();
+                    let uri_type = data.read_i32().unwrap_or(0);
+                    if uri_type != 0 {
+                        let _ = ap::read_string8(data).ok();
+                    }
+                }
+                let finish_task = data.read_i32().unwrap_or(0);
+                log::info!("activity-client: finishActivity token={token:?} resultCode={result_code} finishTask={finish_task}");
+                if let Some(token) = token {
+                    self.activity.destroy_activity(token);
+                }
+                ap::no_exception(reply)?;
+                ap::boolean(reply, true)?;
+                Ok(true)
+            }
+            "finishActivityAffinity" => {
+                let token: Option<SIBinder> = data.read().ok().flatten();
+                log::info!("activity-client: finishActivityAffinity token={token:?}");
+                if let Some(token) = token {
+                    self.activity.destroy_activity(token);
+                }
+                ap::no_exception(reply)?;
+                ap::boolean(reply, true)?;
                 Ok(true)
             }
             _ => Ok(false),

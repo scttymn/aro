@@ -1,7 +1,7 @@
 //! The session's package registry: what ARO knows about installed apps.
 //! Until the APK parser lands, entries come from the launch command line.
 use crate::aparcel as ap;
-use crate::parcelables::{ActivityInfo, ApplicationInfo, SharedLibraryInfo};
+use crate::parcelables::{ActivityInfo, ApplicationInfo, ProviderInfo, SharedLibraryInfo};
 use rsbinder::{Parcel, Result};
 use std::sync::Mutex;
 
@@ -21,6 +21,9 @@ pub struct AppSpec {
     pub icon_res: u32,
     pub app_component_factory: Option<String>,
     pub activities: Vec<aro_apk::ActivityDecl>,
+    pub providers: Vec<aro_apk::ProviderDecl>,
+    pub requested_activity: Option<String>,
+    pub debuggable: bool,
 }
 
 impl AppSpec {
@@ -41,6 +44,9 @@ impl AppSpec {
             icon_res: m.app_icon_res,
             app_component_factory: m.app_component_factory.clone(),
             activities: m.activities.clone(),
+            providers: m.providers.clone(),
+            requested_activity: None,
+            debuggable: m.debuggable,
         }
     }
 }
@@ -81,6 +87,9 @@ impl Registry {
         ai.app_component_factory = spec.app_component_factory.clone();
         ai.uid = spec.uid;
         ai.long_version_code = spec.version_code as i64;
+        if spec.debuggable {
+            ai.flags |= crate::parcelables::FLAG_DEBUGGABLE;
+        }
         // Window extensions: a real device links these into every app when extensions are enabled.
         ai.shared_library_infos = vec![
             SharedLibraryInfo::builtin("/system_ext/framework/androidx.window.extensions.jar", "androidx.window.extensions"),
@@ -92,19 +101,46 @@ impl Registry {
     /// android.content.pm.ActivityInfo for one of the app's declared activities.
     pub fn activity_info(spec: &AppSpec, name: &str) -> Option<ActivityInfo> {
         let decl = spec.activities.iter().find(|a| a.name == name)?;
+        let target_decl = decl.target_activity.as_ref().and_then(|t| spec.activities.iter().find(|a| a.name == *t));
+        let class_name = decl.target_activity.clone().unwrap_or_else(|| decl.name.clone());
+        let theme = if decl.theme != 0 {
+            decl.theme as i32
+        } else if let Some(td) = target_decl {
+            if td.theme != 0 { td.theme as i32 } else { spec.app_theme as i32 }
+        } else {
+            spec.app_theme as i32
+        };
         Some(ActivityInfo {
-            name: decl.name.clone(),
+            name: class_name,
             package_name: spec.package.clone(),
             application_info: Self::application_info(spec),
             process_name: spec.package.clone(),
-            theme: if decl.theme != 0 { decl.theme as i32 } else { spec.app_theme as i32 },
+            theme,
             launch_mode: decl.launch_mode,
-            flags: 0,
+            flags: 1 << 9, // ActivityInfo.FLAG_HARDWARE_ACCELERATED
             config_changes: decl.config_changes,
             screen_orientation: decl.screen_orientation,
             soft_input_mode: decl.soft_input_mode,
             task_affinity: Some(decl.task_affinity.clone().unwrap_or_else(|| spec.package.clone())),
         })
+    }
+
+    /// android.content.pm.ProviderInfo for one of the app's declared providers.
+    pub fn provider_info(spec: &AppSpec, decl: &aro_apk::ProviderDecl) -> ProviderInfo {
+        ProviderInfo {
+            name: decl.name.clone(),
+            package_name: spec.package.clone(),
+            application_info: Self::application_info(spec),
+            process_name: spec.package.clone(),
+            exported: decl.exported,
+            authority: decl.authority.clone(),
+            read_permission: decl.read_permission.clone(),
+            write_permission: decl.write_permission.clone(),
+            grant_uri_permissions: decl.grant_uri_permissions,
+            multiprocess: decl.multiprocess,
+            init_order: decl.init_order,
+            syncable: decl.syncable,
+        }
     }
 
     /// android.content.pm.PackageInfo (spec/parcels/android.content.pm.PackageInfo.txt).

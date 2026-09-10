@@ -10,16 +10,23 @@
 use crate::pending_intent::Target;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use zbus::blocking::{Connection, Proxy};
 use zbus::zvariant::Value;
 
 /// Called with a tapped notification's launch target.
 pub type Fire = Arc<dyn Fn(&Target) + Send + Sync>;
 
+struct ActiveNote {
+    host_id: u32,
+    last_summary: String,
+    _last_posted: Instant,
+}
+
 pub struct Notifier {
     proxy: Proxy<'static>,
-    /// (package, tag, id) -> host notification id, so updates replace and cancels close.
-    ids: Mutex<HashMap<(String, Option<String>, i32), u32>>,
+    /// (package, tag, id) -> active host notification, so updates replace and cancels close.
+    active: Mutex<HashMap<(String, Option<String>, i32), ActiveNote>>,
     /// host notification id -> launch target, so ActionInvoked can re-open the app.
     targets: Arc<Mutex<HashMap<u32, Target>>>,
 }
@@ -37,7 +44,7 @@ impl Notifier {
         }
         let targets = Arc::new(Mutex::new(HashMap::new()));
         Self::spawn_listener(conn, targets.clone(), fire);
-        Ok(Notifier { proxy, ids: Mutex::new(HashMap::new()), targets })
+        Ok(Notifier { proxy, active: Mutex::new(HashMap::new()), targets })
     }
 
     /// Watch `ActionInvoked` (tap) and `NotificationClosed` (dismiss) so a tap
@@ -81,7 +88,19 @@ impl Notifier {
     #[allow(clippy::too_many_arguments)]
     pub fn notify(&self, package: &str, tag: Option<&str>, id: i32, app_name: &str, summary: &str, body: &str, urgency: u8, resident: bool, target: Option<Target>) {
         let key = (package.to_string(), tag.map(str::to_string), id);
-        let replaces = self.ids.lock().unwrap().get(&key).copied().unwrap_or(0);
+        let mut active = self.active.lock().unwrap();
+        let replaces = if let Some(entry) = active.get(&key) {
+            // Suppress repetitive host toasts if the notification was already posted and
+            // either it is resident/ongoing or the summary has not changed (e.g. 1Hz distance updates).
+            if resident || entry.last_summary == summary {
+                log::debug!("notify: suppressing repetitive host toast for {package} id={id} (same summary/resident)");
+                return;
+            }
+            entry.host_id
+        } else {
+            0
+        };
+
         let mut hints: HashMap<&str, Value<'_>> = HashMap::new();
         hints.insert("urgency", Value::U8(urgency));
         hints.insert("desktop-entry", Value::from(package));
@@ -92,13 +111,16 @@ impl Notifier {
         // daemon reports it back via ActionInvoked when the user taps.
         let has_target = target.is_some();
         let actions: Vec<&str> = if has_target { vec!["default", "Open"] } else { Vec::new() };
-        // A tappable notification stays until the user acts on it (timeout 0),
-        // rather than expiring and being missed; ongoing ones are also resident.
-        let timeout: i32 = if resident || has_target { 0 } else { -1 };
+        // Normal toasts expire after desktop default (-1); resident ones persist (0).
+        let timeout: i32 = if resident { 0 } else { -1 };
         match self.proxy.call::<_, _, u32>("Notify", &(app_name, replaces, "", summary, body, actions, hints, timeout)) {
             Ok(hid) => {
-                log::debug!("notify: posted host id {hid} (target={has_target})");
-                self.ids.lock().unwrap().insert(key, hid);
+                log::debug!("notify: posted host id {hid} (replaces={replaces}, target={has_target})");
+                active.insert(key, ActiveNote {
+                    host_id: hid,
+                    last_summary: summary.to_string(),
+                    _last_posted: Instant::now(),
+                });
                 match target {
                     Some(t) => { self.targets.lock().unwrap().insert(hid, t); }
                     None => { self.targets.lock().unwrap().remove(&hid); }
@@ -110,19 +132,19 @@ impl Notifier {
 
     pub fn close(&self, package: &str, tag: Option<&str>, id: i32) {
         let key = (package.to_string(), tag.map(str::to_string), id);
-        if let Some(host_id) = self.ids.lock().unwrap().remove(&key) {
-            self.targets.lock().unwrap().remove(&host_id);
-            let _: Result<(), _> = self.proxy.call("CloseNotification", &(host_id,));
+        if let Some(entry) = self.active.lock().unwrap().remove(&key) {
+            self.targets.lock().unwrap().remove(&entry.host_id);
+            let _: Result<(), _> = self.proxy.call("CloseNotification", &(entry.host_id,));
         }
     }
 
     pub fn close_all(&self, package: &str) {
-        let mut ids = self.ids.lock().unwrap();
-        let keys: Vec<_> = ids.keys().filter(|k| k.0 == package).cloned().collect();
+        let mut active = self.active.lock().unwrap();
+        let keys: Vec<_> = active.keys().filter(|k| k.0 == package).cloned().collect();
         for k in keys {
-            if let Some(host_id) = ids.remove(&k) {
-                self.targets.lock().unwrap().remove(&host_id);
-                let _: Result<(), _> = self.proxy.call("CloseNotification", &(host_id,));
+            if let Some(entry) = active.remove(&k) {
+                self.targets.lock().unwrap().remove(&entry.host_id);
+                let _: Result<(), _> = self.proxy.call("CloseNotification", &(entry.host_id,));
             }
         }
     }

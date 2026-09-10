@@ -40,6 +40,11 @@ pub fn read_string8(p: &mut Parcel) -> Result<Option<String>> {
     Ok(Some(String::from_utf8_lossy(&bytes).into_owned()))
 }
 
+/// `Parcel.readString` (UTF-16).
+pub fn read_string16(p: &mut Parcel) -> Result<Option<String>> {
+    p.read()
+}
+
 /// `Parcel.writeString` (UTF-16); null = -1.
 pub fn string16(p: &mut Parcel, s: Option<&str>) -> Result<()> {
     p.write(&s)

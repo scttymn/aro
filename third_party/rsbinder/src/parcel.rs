@@ -1339,6 +1339,18 @@ impl Parcel {
         Ok(())
     }
 
+    /// ARO patch: read a bare file-descriptor object, the way C++
+    /// `Parcel::readFileDescriptor` / `FileDescriptor` AIDL type does
+    /// (no not-null marker, no comm-fd marker). The descriptor is dup'ed.
+    pub fn read_raw_file_descriptor(&mut self) -> Result<std::os::fd::OwnedFd> {
+        let obj = self.read_object(true)?;
+        if obj.header_type() != crate::sys::BINDER_TYPE_FD {
+            return Err(StatusCode::BadType);
+        }
+        let fd = rustix::io::fcntl_dupfd_cloexec(obj.borrowed_fd(), 0)?;
+        Ok(fd)
+    }
+
     pub(crate) fn write_object(&mut self, obj: &flat_binder_object, null_meta: bool) -> Result<()> {
         // RPC mode never carries `flat_binder_object`s: binders are
         // marshalled as `RpcAddress` and FDs are rejected upstream.
@@ -1363,7 +1375,7 @@ impl Parcel {
         Ok(())
     }
 
-    pub(crate) fn write_interface_token(&mut self, interface: &str) -> Result<()> {
+    pub fn write_interface_token(&mut self, interface: &str) -> Result<()> {
         self.write(&(thread_state::get_strict_mode_policy() | STRICT_MODE_PENALTY_GATHER))?;
         self.update_work_source_request_header_pos();
         let work_source: i32 = if thread_state::should_propagate_work_source() {

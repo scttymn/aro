@@ -121,8 +121,7 @@ impl Default for ApplicationInfo {
             process_name: None,
             class_name: None,
             theme: 0,
-            // No FLAG_HARDWARE_ACCELERATED yet: ARO windows are software-rendered until the GPU path lands (M3+).
-            flags: FLAG_HAS_CODE | FLAG_ALLOW_CLEAR_USER_DATA | FLAG_ALLOW_BACKUP | FLAG_SUPPORTS_SCREEN_DENSITIES | FLAG_INSTALLED | FLAG_EXTRACT_NATIVE_LIBS,
+            flags: FLAG_HAS_CODE | FLAG_ALLOW_CLEAR_USER_DATA | FLAG_ALLOW_BACKUP | FLAG_SUPPORTS_SCREEN_DENSITIES | FLAG_INSTALLED | FLAG_EXTRACT_NATIVE_LIBS | FLAG_HARDWARE_ACCELERATED,
             private_flags: 0,
             private_flags_ext: 0,
             source_dir: None,
@@ -431,6 +430,7 @@ pub struct Intent {
     pub component: Option<(String, String)>,
     pub categories: Vec<String>,
     pub flags: i32,
+    pub extras: Option<crate::pending_intent::RawBundle>,
 }
 
 pub const FLAG_ACTIVITY_NEW_TASK: i32 = 0x1000_0000;
@@ -463,9 +463,67 @@ impl Intent {
         p.write_i32(0)?; // mSelector: absent
         p.write_i32(0)?; // mClipData: absent
         p.write_i32(-2)?; // mContentUserHint: UserHandle.USER_CURRENT
-        ap::null_array(p)?; // mExtras: writeBundle(null)
+        match &self.extras {
+            Some(b) if b.length > 0 => {
+                p.write_i32(b.length)?;
+                p.write_i32(b.magic)?;
+                let chunks = ((b.length.max(0) as usize + 3) & !3) / 4;
+                for i in 0..chunks {
+                    let off = i * 4;
+                    let b0 = b.data.get(off).copied().unwrap_or(0);
+                    let b1 = b.data.get(off + 1).copied().unwrap_or(0);
+                    let b2 = b.data.get(off + 2).copied().unwrap_or(0);
+                    let b3 = b.data.get(off + 3).copied().unwrap_or(0);
+                    p.write_u32(u32::from_le_bytes([b0, b1, b2, b3]))?;
+                }
+                p.write_i32(b.has_intent)?;
+            }
+            Some(b) if b.length == 0 => {
+                p.write_i32(0)?;
+            }
+            _ => {
+                ap::null_array(p)?; // mExtras: writeBundle(null)
+            }
+        }
         p.write_i32(0)?; // mOriginalIntent: absent
         p.write_i32(0) // creator token info: absent (Flags.preventIntentRedirect() is true in this image)
+    }
+}
+
+/// android.content.pm.ServiceInfo
+#[derive(Clone, Debug)]
+pub struct ServiceInfo {
+    pub name: String,
+    pub package_name: String,
+    pub application_info: ApplicationInfo,
+    pub process_name: String,
+    pub permission: Option<String>,
+    pub flags: i32,
+    pub foreground_service_type: i32,
+}
+
+impl ServiceInfo {
+    pub fn write(&self, p: &mut Parcel) -> Result<()> {
+        // ComponentInfo
+        ap::string8(p, Some(&self.name))?;
+        p.write_i32(1 | 2)?; // enabled | exported
+        ap::string8(p, Some(&self.package_name))?; // packageName
+        p.write_i32(0)?; // labelRes
+        ap::char_sequence(p, None)?; // nonLocalizedLabel
+        p.write_i32(0)?; // icon
+        p.write_i32(0)?; // logo
+        ap::null_array(p)?; // metaData
+        p.write_i32(0)?; // banner
+        p.write_i32(0)?; // showUserIcon
+        self.application_info.write(p)?;
+        ap::string8(p, Some(&self.process_name))?; // processName
+        ap::string8(p, None)?; // splitName
+        ap::null_array(p)?; // attributionTags
+        p.write_i32(0)?; // descriptionRes
+        // ServiceInfo
+        ap::string8(p, self.permission.as_deref())?;
+        p.write_i32(self.flags)?;
+        p.write_i32(self.foreground_service_type)
     }
 }
 
@@ -537,6 +595,56 @@ impl ActivityInfo {
     }
 }
 
+/// android.content.pm.ProviderInfo
+#[derive(Clone, Debug)]
+pub struct ProviderInfo {
+    pub name: String,
+    pub package_name: String,
+    pub application_info: ApplicationInfo,
+    pub process_name: String,
+    pub exported: bool,
+    pub authority: String,
+    pub read_permission: Option<String>,
+    pub write_permission: Option<String>,
+    pub grant_uri_permissions: bool,
+    pub multiprocess: bool,
+    pub init_order: i32,
+    pub syncable: bool,
+}
+
+impl ProviderInfo {
+    pub fn write(&self, p: &mut Parcel) -> Result<()> {
+        // ComponentInfo
+        ap::string8(p, Some(&self.name))?;
+        p.write_i32(1 | (if self.exported { 2 } else { 0 }))?; // enabled | exported
+        ap::string8(p, Some(&self.package_name))?; // packageName
+        p.write_i32(0)?; // labelRes
+        ap::char_sequence(p, None)?; // nonLocalizedLabel
+        p.write_i32(0)?; // icon
+        p.write_i32(0)?; // logo
+        ap::null_array(p)?; // metaData
+        p.write_i32(0)?; // banner
+        p.write_i32(0)?; // showUserIcon
+        self.application_info.write(p)?;
+        ap::string8(p, Some(&self.process_name))?; // processName
+        ap::string8(p, None)?; // splitName
+        ap::null_array(p)?; // attributionTags
+        p.write_i32(0)?; // descriptionRes
+        // ProviderInfo
+        ap::string8(p, Some(&self.authority))?;
+        ap::string8(p, self.read_permission.as_deref())?;
+        ap::string8(p, self.write_permission.as_deref())?;
+        p.write_i32(self.grant_uri_permissions as i32)?;
+        p.write_i32(0)?; // forceUriPermissions
+        ap::null_array(p)?; // uriPermissionPatterns
+        ap::null_array(p)?; // pathPermissions
+        p.write_i32(self.multiprocess as i32)?;
+        p.write_i32(self.init_order)?;
+        p.write_i32(0)?; // flags
+        p.write_i32(self.syncable as i32)
+    }
+}
+
 /// android.window.ActivityWindowInfo
 pub fn write_activity_window_info(p: &mut Parcel, task: Rect) -> Result<()> {
     ap::boolean(p, false)?; // mIsEmbedded
@@ -600,3 +708,24 @@ impl LaunchTransaction<'_> {
         ap::boolean(p, false) // mShouldSendCompatFakeFocus
     }
 }
+
+/// android.app.ContentProviderHolder
+#[derive(Clone, Debug)]
+pub struct ContentProviderHolder {
+    pub info: ProviderInfo,
+    pub provider: rsbinder::SIBinder,
+    pub connection: rsbinder::SIBinder,
+    pub no_release_needed: bool,
+    pub local: bool,
+}
+
+impl ContentProviderHolder {
+    pub fn write(&self, p: &mut Parcel) -> Result<()> {
+        self.info.write(p)?;
+        p.write(&Some(self.provider.clone()))?;
+        p.write(&Some(self.connection.clone()))?;
+        p.write_i32(self.no_release_needed as i32)?;
+        p.write_i32(self.local as i32)
+    }
+}
+

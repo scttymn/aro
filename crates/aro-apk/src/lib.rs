@@ -16,7 +16,8 @@ pub mod attr {
     pub const DEBUGGABLE: u32 = 0x0101_000f;
     pub const EXPORTED: u32 = 0x0101_0010;
     pub const PROCESS: u32 = 0x0101_0011;
-    pub const TASK_AFFINITY: u32 = 0x0101_0202;
+    pub const TARGET_ACTIVITY: u32 = 0x0101_0202;
+    pub const TASK_AFFINITY: u32 = 0x0101_0012;
     pub const LAUNCH_MODE: u32 = 0x0101_001d;
     pub const SCREEN_ORIENTATION: u32 = 0x0101_001e;
     pub const CONFIG_CHANGES: u32 = 0x0101_001f;
@@ -28,6 +29,14 @@ pub mod attr {
     pub const EXTRACT_NATIVE_LIBS: u32 = 0x0101_04ea;
     pub const APP_COMPONENT_FACTORY: u32 = 0x0101_057a;
     pub const RESIZEABLE_ACTIVITY: u32 = 0x0101_04f6;
+    pub const AUTHORITIES: u32 = 0x0101_0018;
+    pub const SYNCABLE: u32 = 0x0101_0019;
+    pub const MULTIPROCESS: u32 = 0x0101_001a;
+    pub const INIT_ORDER: u32 = 0x0101_001b;
+    pub const GRANT_URI_PERMISSIONS: u32 = 0x0101_001c;
+    pub const READ_PERMISSION: u32 = 0x0101_0007;
+    pub const WRITE_PERMISSION: u32 = 0x0101_0008;
+    pub const PERMISSION: u32 = 0x0101_0006;
 }
 
 #[derive(Clone, Debug, Default)]
@@ -42,6 +51,7 @@ pub struct IntentFilter {
 #[derive(Clone, Debug, Default)]
 pub struct ActivityDecl {
     pub name: String,
+    pub target_activity: Option<String>,
     pub theme: u32,
     pub launch_mode: i32,
     pub exported: Option<bool>,
@@ -51,6 +61,19 @@ pub struct ActivityDecl {
     pub task_affinity: Option<String>,
     pub launcher: bool,
     pub filters: Vec<IntentFilter>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ProviderDecl {
+    pub name: String,
+    pub authority: String,
+    pub exported: bool,
+    pub grant_uri_permissions: bool,
+    pub multiprocess: bool,
+    pub init_order: i32,
+    pub read_permission: Option<String>,
+    pub write_permission: Option<String>,
+    pub syncable: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -68,11 +91,15 @@ pub struct Manifest {
     pub extract_native_libs: bool,
     pub app_component_factory: Option<String>,
     pub activities: Vec<ActivityDecl>,
+    pub providers: Vec<ProviderDecl>,
 }
 
 impl Manifest {
     pub fn main_activity(&self) -> Option<&ActivityDecl> {
-        self.activities.iter().find(|a| a.launcher)
+        self.activities.iter().find(|a| a.launcher).or_else(|| {
+            self.activities.iter().find(|a| a.filters.iter().any(|f| f.actions.iter().any(|act| act == "android.intent.action.MAIN" || act == "android.intent.action.GET_CONTENT" || act == "android.intent.action.PICK")))
+                .or_else(|| self.activities.first())
+        })
     }
     pub fn activity(&self, name: &str) -> Option<&ActivityDecl> {
         self.activities.iter().find(|a| a.name == name)
@@ -124,8 +151,10 @@ pub fn parse_manifest(data: &[u8]) -> Result<Manifest> {
                 mime_types: f.children_named("data").filter_map(|d| d.attr(attr::MIME_TYPE, "mimeType").and_then(|v| v.as_str()).map(String::from)).collect(),
             }).collect();
             let launcher = filters.iter().any(|f| f.actions.iter().any(|x| x == "android.intent.action.MAIN") && f.categories.iter().any(|x| x == "android.intent.category.LAUNCHER"));
+            let target_activity = a.attr(attr::TARGET_ACTIVITY, "targetActivity").and_then(|v| v.as_str()).map(|n| qualify(&m.package, n));
             m.activities.push(ActivityDecl {
                 name: qualify(&m.package, name),
+                target_activity,
                 theme: a.attr(attr::THEME, "theme").and_then(|v| v.as_int()).unwrap_or(0) as u32,
                 launch_mode: a.attr(attr::LAUNCH_MODE, "launchMode").and_then(|v| v.as_int()).unwrap_or(0),
                 exported: a.attr(attr::EXPORTED, "exported").and_then(|v| v.as_bool()),
@@ -137,8 +166,40 @@ pub fn parse_manifest(data: &[u8]) -> Result<Manifest> {
                 filters,
             });
         }
+        for p in app.children_named("provider") {
+            let Some(name) = p.attr(attr::NAME, "name").and_then(|v| v.as_str()) else { continue };
+            let Some(authority) = p.attr(attr::AUTHORITIES, "authorities").and_then(|v| v.as_str()) else { continue };
+            m.providers.push(ProviderDecl {
+                name: qualify(&m.package, name),
+                authority: authority.to_string(),
+                exported: p.attr(attr::EXPORTED, "exported").and_then(|v| v.as_bool()).unwrap_or(false),
+                grant_uri_permissions: p.attr(attr::GRANT_URI_PERMISSIONS, "grantUriPermissions").and_then(|v| v.as_bool()).unwrap_or(false),
+                multiprocess: p.attr(attr::MULTIPROCESS, "multiprocess").and_then(|v| v.as_bool()).unwrap_or(false),
+                init_order: p.attr(attr::INIT_ORDER, "initOrder").and_then(|v| v.as_int()).unwrap_or(0),
+                read_permission: p.attr(attr::READ_PERMISSION, "readPermission").or_else(|| p.attr(attr::PERMISSION, "permission")).and_then(|v| v.as_str()).map(String::from),
+                write_permission: p.attr(attr::WRITE_PERMISSION, "writePermission").or_else(|| p.attr(attr::PERMISSION, "permission")).and_then(|v| v.as_str()).map(String::from),
+                syncable: p.attr(attr::SYNCABLE, "syncable").and_then(|v| v.as_bool()).unwrap_or(false),
+            });
+        }
     }
     Ok(m)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_calendar_alias() {
+        let path = std::path::Path::new("/home/scttymn/.local/share/aro/system/system/product/app/Calendar/Calendar.apk");
+        if !path.exists() {
+            return;
+        }
+        let m = inspect(path).unwrap();
+        let alias = m.activities.iter().find(|a| a.name == "com.android.calendar.LaunchActivity");
+        assert!(alias.is_some());
+        assert_eq!(alias.unwrap().target_activity.as_deref(), Some("com.android.calendar.AllInOneActivity"));
+    }
 }
 
 /// Best-effort extract the app's launcher icon bytes from an APK.
@@ -194,12 +255,19 @@ pub fn extract_icon(apk: &Path) -> Option<(Vec<u8>, &'static str)> {
     Some((data, ext))
 }
 
-/// Read and parse the manifest inside an APK.
-pub fn inspect(apk: &Path) -> Result<Manifest> {
+/// Read raw AndroidManifest.xml bytes from an APK.
+pub fn read_manifest_bytes(apk: &Path) -> Result<Vec<u8>> {
     let file = std::fs::File::open(apk).with_context(|| format!("opening {}", apk.display()))?;
     let mut zip = zip::ZipArchive::new(file).context("reading APK zip")?;
     let mut entry = zip.by_name("AndroidManifest.xml").context("APK has no AndroidManifest.xml")?;
     let mut data = Vec::with_capacity(entry.size() as usize);
     std::io::Read::read_to_end(&mut entry, &mut data)?;
+    Ok(data)
+}
+
+/// Read and parse the manifest inside an APK.
+pub fn inspect(apk: &Path) -> Result<Manifest> {
+    let data = read_manifest_bytes(apk)?;
     parse_manifest(&data)
 }
+

@@ -15,9 +15,14 @@ impl Service for AudioService {
     fn handle(&self, name: &str, _code: TransactionCode, _data: &mut Parcel, reply: &mut Parcel) -> Result<bool> {
         match name {
             // Volume/ringer queries with specific sane values.
-            "getStreamVolume" | "getStreamMinVolume" | "getLastAudibleStreamVolume" => {
+            "getStreamMinVolume" => {
                 ap::no_exception(reply)?;
                 reply.write_i32(0)?;
+                Ok(true)
+            }
+            "getStreamVolume" | "getLastAudibleStreamVolume" => {
+                ap::no_exception(reply)?;
+                reply.write_i32(10)?;
                 Ok(true)
             }
             "getStreamMaxVolume" => {

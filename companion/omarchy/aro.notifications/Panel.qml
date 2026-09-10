@@ -69,31 +69,53 @@ Panel {
   }
 
   function send(obj) {
-    if (sock.connected) sock.write(JSON.stringify(obj) + "\n")
+    var s = sockLoader.item
+    if (s && s.connected) {
+      s.write(JSON.stringify(obj) + "\n")
+      s.flush()
+    }
   }
 
   function invoke(id) { send({ cmd: "invoke", id: id }); root.close() }
   function dismiss(id) { send({ cmd: "dismiss", id: id }) }
   function dismissAll() { send({ cmd: "dismissAll" }) }
 
-  Socket {
-    id: sock
-    path: root.socketPath
-    connected: true
-    parser: SplitParser { onRead: function(line) { root.onLine(line) } }
-    onConnectedChanged: {
-      // arod not running (yet) or the app exited: clear the list and keep
-      // trying, so the shade fills in as soon as an app comes up.
-      if (!connected) { notes.clear(); reconnect.restart() }
+  Loader {
+    id: sockLoader
+    active: true
+    sourceComponent: Component {
+      Socket {
+        path: root.socketPath
+        connected: true
+        parser: SplitParser { onRead: function(line) { root.onLine(line) } }
+        onConnectedChanged: {
+          if (!connected) {
+            notes.clear()
+            reconnect.start()
+          } else {
+            reconnect.stop()
+          }
+        }
+        onError: function(err) {
+          notes.clear()
+          reconnect.start()
+        }
+      }
     }
-    onError: reconnect.restart()
   }
 
   Timer {
     id: reconnect
-    interval: 1500
-    repeat: false
-    onTriggered: if (!sock.connected) sock.connected = true
+    interval: 1000
+    repeat: true
+    running: true
+    onTriggered: {
+      var s = sockLoader.item
+      if (!s || !s.connected) {
+        sockLoader.active = false
+        sockLoader.active = true
+      }
+    }
   }
 
   KeyboardPanel {

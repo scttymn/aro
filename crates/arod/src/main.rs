@@ -17,6 +17,7 @@ mod dnsproxy;
 mod hostnet;
 mod shade;
 mod compositor;
+#[allow(dead_code)]
 mod notify;
 mod input_channel;
 use aro_exec::{layout::Layout, logd, ns::Session, prepare};
@@ -116,8 +117,41 @@ fn main() -> Result<()> {
     // 3b. Services.
     let registry = std::sync::Arc::new(services::registry::Registry { apps: std::sync::Mutex::new(Vec::new()), display });
     let pending_intents = pending_intent::Registry::new();
-    let activity = std::sync::Arc::new(services::activity::ActivityService { registry: registry.clone(), pending: std::sync::Mutex::new(None), attached: std::sync::Mutex::new(None), client_controller: std::sync::Mutex::new(None), launch_url: std::sync::Mutex::new(None), pending_intents: pending_intents.clone() });
-    let controller = services::binder_of(services::activity_task::ActivityClientController);
+    let compat = std::sync::Arc::new(services::compat::PlatformCompatService::load(&layout.system, registry.clone()));
+    let settings_service = std::sync::Arc::new(services::settings::SettingsService::load(&layout.data));
+    let settings_provider = services::binder_of(services::settings::SettingsProvider {
+        service: settings_service.clone(),
+    });
+    let media_service = std::sync::Arc::new(services::media::MediaService::load(&layout.system, &layout.data));
+    let bulk_cursor = services::binder_of(services::cursor::BulkCursorService);
+    let media_provider = services::binder_of(services::media::MediaProvider {
+        service: media_service.clone(),
+        bulk_cursor,
+    });
+    let calendar_service = std::sync::Arc::new(services::calendar::CalendarService::load(&layout.data));
+    let calendar_bulk_cursor = services::binder_of(services::cursor::BulkCursorService);
+    let calendar_provider = services::binder_of(services::calendar::CalendarProvider {
+        service: calendar_service.clone(),
+        bulk_cursor: calendar_bulk_cursor,
+    });
+    let activity = std::sync::Arc::new(services::activity::ActivityService {
+        registry: registry.clone(),
+        compat: compat.clone(),
+        settings_provider,
+        media_provider,
+        media_service: media_service.clone(),
+        calendar_provider,
+        calendar_service: calendar_service.clone(),
+        pending: std::sync::Mutex::new(None),
+        attached: std::sync::Mutex::new(None),
+        client_controller: std::sync::Mutex::new(None),
+        launch_url: std::sync::Mutex::new(None),
+        pending_intents: pending_intents.clone(),
+        activity_stack: std::sync::Mutex::new(Vec::new()),
+        running_services: std::sync::Mutex::new(std::collections::HashMap::new()),
+        next_service_start_id: std::sync::atomic::AtomicI32::new(1),
+    });
+    let controller = services::binder_of(services::activity_task::ActivityClientController { activity: activity.clone() });
     *activity.client_controller.lock().unwrap() = Some(controller.clone());
     services::publish(&hub_impl, "activity_task", services::activity_task::ActivityTaskService { client_controller: std::sync::Mutex::new(Some(controller)), activity: activity.clone() });
     // Gralloc (allocator + mapper) — created early so the composer can resolve
@@ -125,12 +159,14 @@ fn main() -> Result<()> {
     let gralloc = std::sync::Arc::new(services::allocator::Gralloc::default());
     let input_hub = std::sync::Arc::new(input_channel::InputHub::default());
     // Composer + window manager.
-    let sf = std::sync::Arc::new(services::surfaceflinger::SurfaceFlinger::new(hd.width as u32, hd.height as u32, hd.frame_interval_ns()));
-    let composer_client = services::binder_of(services::surfaceflinger::ComposerClient { sf: sf.clone() });
+    let sf = std::sync::Arc::new(services::surfaceflinger::SurfaceFlinger::new(hd.width as u32, hd.height as u32, hd.dpi() as u32, hd.frame_interval_ns()));
+    let composer_client_host = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let composer_client = services::binder_of(services::surfaceflinger::ComposerClient { sf: sf.clone(), host: composer_client_host.clone() });
     *sf.client.lock().unwrap() = Some(composer_client.clone());
     let display_token = services::token::new_token("display");
     services::publish(&hub_impl, "SurfaceFlingerAIDL", services::surfaceflinger::ComposerAidl { sf: sf.clone(), client: composer_client, display_token });
     let window_host = std::sync::Arc::new(services::window_session::WindowHost::new(sf.clone(), (hd.width, hd.height), hd.dpi(), hd.scale, input_hub.clone()));
+    *composer_client_host.lock().unwrap() = Some(window_host.clone());
     // Window identity is the app's: package as app_id (desktop matches it to a
     // .desktop entry); the title is the package until the manifest label is
     // resolved from resources.arsc.
@@ -160,24 +196,22 @@ fn main() -> Result<()> {
     let fire_activity = activity.clone();
     let fire: std::sync::Arc<dyn Fn(&pending_intent::Target) + Send + Sync> =
         std::sync::Arc::new(move |t: &pending_intent::Target| {
-            log::info!("notify: tap -> {t:?}");
-            fire_activity.start_activity(t.package.clone(), t.class.clone(), t.action.clone(), t.data.clone());
+            log::info!("intent dispatch: target -> {t:?}");
+            if t.intent_type == 4 || t.intent_type == 5 || (t.intent_type == 0 && t.class.as_deref().map(|c| c.contains("Service")).unwrap_or(false)) {
+                fire_activity.start_service(t);
+            } else {
+                fire_activity.start_activity(t.package.clone(), t.class.clone(), t.action.clone(), t.data.clone());
+            }
         });
-    let notifier = match notify::Notifier::connect(session.host_uid, fire.clone()) {
-        Ok(n) => Some(std::sync::Arc::new(n)),
-        Err(e) => { log::warn!("notify: no host notification service ({e}); notifications logged only"); None }
-    };
-    // The ARO shade: a persistent, Android-style notification list served to the
-    // companion Omarchy widget over a Unix socket. Taps ride the same dispatch.
+    pending_intents.set_fire_handler(fire.clone());
+    // The ARO shade: an Android notification list served to the companion Omarchy
+    // widget on the top bar over a Unix socket.
     let shade = shade::Shade::new(fire);
     if let Err(e) = shade.serve(&layout.runtime.join("notifications.sock")) {
         log::warn!("shade: not serving ({e}); companion widget will be empty");
     }
-    if let Some(n) = &notifier {
-        let n = n.clone();
-        shade.set_close_host(std::sync::Arc::new(move |pkg, tag, id| n.close(pkg, tag, id)));
-    }
-    services::publish(&hub_impl, "notification", services::notification::NotificationService { notifier, pending_intents: pending_intents.clone(), shade: shade.clone(), app_icon });
+    services::publish(&hub_impl, "notification", services::notification::NotificationService { pending_intents: pending_intents.clone(), shade: shade.clone(), app_icon });
+    services::publish(&hub_impl, "contextual_mode", services::modes::ModesService);
     // Network: mirror the host's connection (NetworkManager on the system bus).
     if let Err(e) = dnsproxy::serve(&session.sockets) { log::warn!("dnsproxyd: {e}"); }
     let hostnet = hostnet::probe(session.host_uid);
@@ -188,14 +222,24 @@ fn main() -> Result<()> {
     let vendor_dir = prepare_vendor_dir(&layout)?;
     services::publish(&hub_impl, "accessibility", services::accessibility::AccessibilityService);
     services::publish(&hub_impl, "user", services::user::UserService);
+    services::publish(&hub_impl, "alarm", services::alarm::AlarmService::new(activity.clone(), pending_intents.clone()));
+    services::publish(&hub_impl, "shortcut", services::shortcut::ShortcutService);
+    services::publish(&hub_impl, "appops", services::appops::AppOpsService);
     services::publish(&hub_impl, "uimode", services::uimode::UiModeService);
+    services::publish(&hub_impl, "power", services::power::PowerService);
+    services::publish(&hub_impl, "thermalservice", services::thermal::ThermalService);
+    services::publish(&hub_impl, "content", services::content::ContentService);
     services::publish(&hub_impl, "mount", services::storage::StorageService);
     services::publish(&hub_impl, "sensorservice", services::sensor::SensorService);
     services::publish(&hub_impl, "media.camera", services::camera::CameraService);
+    services::publish(&hub_impl, "media.player", services::media_player::MediaPlayerService);
+    services::publish(&hub_impl, "media.audio_flinger", services::audio_flinger::AudioFlingerService);
+    services::publish(&hub_impl, "media.audio_policy", services::audio_policy::AudioPolicyService);
     services::publish(&hub_impl, "package", services::package::PackageService { registry: registry.clone() });
-    services::publish(&hub_impl, "platform_compat", services::compat::PlatformCompatService::load(&layout.system, registry.clone()));
+    services::publish(&hub_impl, "platform_compat", services::compat::PlatformCompatRef(compat.clone()));
     services::publish(&hub_impl, "display", services::display::DisplayService { name: hd.name.clone(), width: hd.width, height: hd.height, dpi: hd.dpi(), callbacks: std::sync::Mutex::new(Vec::new()) });
     services::publish(&hub_impl, "activity", services::activity::ActivityRef(activity.clone()));
+    services::publish(&hub_impl, "uri_grants", services::uri_grants::UriGrantsService);
 
     // Properties are cheap to regenerate and ARO's extra ones evolve with the runtime.
     let mut extra_props: Vec<(String, String)> = Vec::new();
@@ -214,7 +258,7 @@ fn main() -> Result<()> {
     }
     // External storage maps to a host directory: ARO_SDCARD, else the user's home.
     let sdcard = std::env::var_os("ARO_SDCARD").or_else(|| std::env::var_os("HOME"));
-    if let Some(sd) = sdcard {
+    if let Some(ref sd) = sdcard {
         cmd.env("ARO_SDCARD", sd);
     }
     match cli.cmd {
@@ -235,7 +279,16 @@ fn main() -> Result<()> {
             let package = manifest.package.clone();
             log::info!("arod: {} v{} target sdk {} app {:?} launcher {:?}", package, manifest.version_code, manifest.target_sdk, manifest.app_class, manifest.main_activity().map(|a| &a.name));
             for d in ["data", "user_de/0"] {
-                std::fs::create_dir_all(layout.data.join(d).join(&package))?;
+                let base = layout.data.join(d).join(&package);
+                std::fs::create_dir_all(&base)?;
+                for sub in ["cache", "code_cache", "files", "databases", "shared_prefs"] {
+                    let _ = std::fs::create_dir_all(base.join(sub));
+                }
+            }
+            if let Some(sd) = &sdcard {
+                let sd_path = std::path::Path::new(sd);
+                let _ = std::fs::create_dir_all(sd_path.join("Android/data").join(&package).join("cache"));
+                let _ = std::fs::create_dir_all(sd_path.join("Android/data").join(&package).join("files"));
             }
             let user0 = layout.data.join("user/0");
             if !user0.exists() {
@@ -244,9 +297,19 @@ fn main() -> Result<()> {
             }
             let mut spec = services::registry::AppSpec::from_manifest(&manifest, format!("/data/local/tmp/{name}"), 10001);
             if let Some(a) = main_activity {
-                spec.main_activity = Some(a);
+                spec.main_activity = Some(a.clone());
+                spec.requested_activity = Some(a);
             }
             if let Some(u) = url {
+                let u = if let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) {
+                    if let Some(rest) = u.strip_prefix(&format!("file://{}", home.display())) {
+                        format!("file:///sdcard{rest}")
+                    } else {
+                        u
+                    }
+                } else {
+                    u
+                };
                 *activity.launch_url.lock().unwrap() = Some(u);
             }
             registry.apps.lock().unwrap().push(spec.clone());
@@ -259,26 +322,71 @@ fn main() -> Result<()> {
     std::process::exit(status.code().unwrap_or(1));
 }
 
+fn copy_dir_all(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let ty = entry.file_type()?;
+        let dst_path = dst.join(entry.file_name());
+        if ty.is_dir() {
+            copy_dir_all(&entry.path(), &dst_path)?;
+        } else {
+            std::fs::copy(entry.path(), &dst_path)?;
+        }
+    }
+    Ok(())
+}
+
 /// Assemble the app's /vendor: `lib64/hw/mapper.aro.so` (built from crates/aro-mapper
-/// for x86_64-linux-android). Looked up via ARO_MAPPER_SO, then next to the arod
-/// binary as `mapper.aro.so`, then in the cargo target tree.
+/// for x86_64-linux-android) and Vulkan HAL driver with supporting libs.
 fn prepare_vendor_dir(layout: &aro_exec::layout::Layout) -> anyhow::Result<Option<std::path::PathBuf>> {
     let exe_dir = std::env::current_exe()?.parent().map(|p| p.to_path_buf()).unwrap_or_default();
+    let vendor = layout.runtime.join("vendor");
+    let hw = vendor.join("lib64").join("hw");
+    std::fs::create_dir_all(&hw)?;
+
+    // Copy repo/installed vendor tree if available (contains vulkan.aro.so, libdrm, libexpat, etc.)
+    let vendor_sources = [
+        std::env::var_os("ARO_VENDOR_SRC").map(std::path::PathBuf::from),
+        exe_dir.parent().and_then(|p| p.parent()).map(|p| p.join("vendor")),
+        Some(std::path::PathBuf::from("vendor")),
+        Some(exe_dir.join("vendor")),
+    ];
+    if let Some(src_dir) = vendor_sources.into_iter().flatten().find(|p| p.is_dir()) {
+        log::info!("vendor: copying vendor libraries from {}", src_dir.display());
+        if let Err(e) = copy_dir_all(&src_dir, &vendor) {
+            log::warn!("vendor: failed to copy from {}: {e}", src_dir.display());
+        }
+    }
+
+    // Also symlink/copy vendor/lib64/* into vendor/lib64/hw/ to guarantee loader finds them
+    let lib64 = vendor.join("lib64");
+    if let Ok(entries) = std::fs::read_dir(&lib64) {
+        for entry in entries.flatten() {
+            if let Ok(ft) = entry.file_type() {
+                if ft.is_file() {
+                    let target = hw.join(entry.file_name());
+                    if !target.exists() {
+                        let _ = std::fs::copy(entry.path(), &target);
+                    }
+                }
+            }
+        }
+    }
+
     let candidates = [
         std::env::var_os("ARO_MAPPER_SO").map(std::path::PathBuf::from),
         Some(exe_dir.join("mapper.aro.so")),
         exe_dir.parent().map(|t| t.join("x86_64-linux-android").join("debug").join("libaro_mapper.so")),
         exe_dir.parent().map(|t| t.join("x86_64-linux-android").join("release").join("libaro_mapper.so")),
     ];
-    let Some(src) = candidates.into_iter().flatten().find(|p| p.is_file()) else {
+    if let Some(src) = candidates.into_iter().flatten().find(|p| p.is_file()) {
+        std::fs::copy(&src, hw.join("mapper.aro.so"))?;
+        log::info!("gralloc: mapper {} -> {}", src.display(), hw.join("mapper.aro.so").display());
+    } else {
         log::warn!("gralloc: mapper.aro.so not found (build with `cargo build -p aro-mapper --target x86_64-linux-android`); apps cannot allocate buffers");
-        return Ok(None);
-    };
-    let vendor = layout.runtime.join("vendor");
-    let hw = vendor.join("lib64").join("hw");
-    std::fs::create_dir_all(&hw)?;
-    std::fs::copy(&src, hw.join("mapper.aro.so"))?;
-    log::info!("gralloc: mapper {} -> {}", src.display(), hw.join("mapper.aro.so").display());
+    }
+
     Ok(Some(vendor))
 }
 

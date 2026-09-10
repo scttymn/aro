@@ -7,6 +7,12 @@ fn main() -> anyhow::Result<()> {
     println!("application: class={} theme=0x{:08x} label=0x{:08x} icon=0x{:08x} debuggable={}", m.app_class.as_deref().unwrap_or("-"), m.app_theme, m.app_label_res, m.app_icon_res, m.debuggable);
     for a in &m.activities {
         println!("activity: {}{} theme=0x{:08x} launchMode={} configChanges=0x{:x}", a.name, if a.launcher { " [LAUNCHER]" } else { "" }, a.theme, a.launch_mode, a.config_changes);
+        for f in &a.filters {
+            println!("  filter: actions={:?} categories={:?} schemes={:?} mime_types={:?}", f.actions, f.categories, f.schemes, f.mime_types);
+        }
+    }
+    for p in &m.providers {
+        println!("provider: {} auth={} exported={}", p.name, p.authority, p.exported);
     }
     Ok(())
 }

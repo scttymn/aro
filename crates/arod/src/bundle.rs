@@ -13,11 +13,13 @@ pub const BUNDLE_MAGIC_NATIVE: i32 = 0x4c44_4e44;
 pub enum Value {
     Null,
     Str(String),
+    Strs(Vec<String>),
     Int(i32),
     Long(i64),
     Bool(bool),
     Float(f32),
     Double(f64),
+    #[allow(dead_code)]
     Skipped(i32),
 }
 
@@ -25,6 +27,22 @@ impl Value {
     pub fn as_str(&self) -> Option<&str> {
         match self {
             Value::Str(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    pub fn as_strs(&self) -> Option<&[String]> {
+        match self {
+            Value::Strs(v) => Some(v),
+            _ => None,
+        }
+    }
+
+    pub fn as_i64(&self) -> Option<i64> {
+        match self {
+            Value::Int(i) => Some(*i as i64),
+            Value::Long(i) => Some(*i),
+            Value::Str(s) => s.parse().ok(),
             _ => None,
         }
     }
@@ -134,8 +152,24 @@ pub fn parse_at(bytes: &[u8], magic_at: usize) -> BTreeMap<String, Value> {
                 14 => {
                     // String[]: n + String16s
                     let Some(n) = c.i32() else { break };
-                    for _ in 0..n.max(0) { if c.string16().is_none() { break; } }
-                    Value::Skipped(t)
+                    if !(0..=4096).contains(&n) {
+                        break;
+                    }
+                    let mut v = Vec::with_capacity(n.max(0) as usize);
+                    let mut ok = true;
+                    for _ in 0..n.max(0) {
+                        match c.string16() {
+                            Some(s) => v.push(s.unwrap_or_default()),
+                            None => {
+                                ok = false;
+                                break;
+                            }
+                        }
+                    }
+                    if !ok {
+                        break;
+                    }
+                    Value::Strs(v)
                 }
                 _ => {
                     out.insert(key, Value::Skipped(t));
@@ -146,6 +180,24 @@ pub fn parse_at(bytes: &[u8], magic_at: usize) -> BTreeMap<String, Value> {
         out.insert(key, v);
     }
     out
+}
+
+/// Parse `bytes` as a single Bundle. Accepts a payload that starts at the
+/// magic, or a 4-byte length prefix then magic (as written on the wire).
+pub fn parse(bytes: &[u8]) -> BTreeMap<String, Value> {
+    if bytes.len() >= 4 {
+        let m = i32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+        if m == BUNDLE_MAGIC || m == BUNDLE_MAGIC_NATIVE {
+            return parse_at(bytes, 0);
+        }
+        if bytes.len() >= 8 {
+            let m2 = i32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
+            if m2 == BUNDLE_MAGIC || m2 == BUNDLE_MAGIC_NATIVE {
+                return parse_at(bytes, 4);
+            }
+        }
+    }
+    find_all(bytes).into_iter().next().unwrap_or_default()
 }
 
 /// Every bundle in `bytes`, in order of appearance.
@@ -161,3 +213,38 @@ pub fn find_all(bytes: &[u8]) -> Vec<BTreeMap<String, Value>> {
     }
     v
 }
+
+/// Write an android.os.Bundle containing string key-value pairs.
+/// If `map` is empty, writes an empty bundle (length 0).
+/// If a value is `None`, writes a null string entry.
+pub fn write_string_bundle(p: &mut rsbinder::Parcel, map: &[(&str, Option<&str>)]) -> rsbinder::Result<()> {
+    if map.is_empty() {
+        return p.write_i32(0);
+    }
+    let len_pos = p.data_position();
+    p.write_i32(-1)?; // placeholder for length
+    p.write_i32(BUNDLE_MAGIC)?;
+    let start_pos = p.data_position();
+
+    p.write_i32(map.len() as i32)?;
+    for (k, v) in map {
+        crate::aparcel::string16(p, Some(k))?;
+        match v {
+            Some(s) => {
+                p.write_i32(0)?; // VAL_STRING = 0
+                crate::aparcel::string16(p, Some(s))?;
+            }
+            None => {
+                p.write_i32(-1)?; // VAL_NULL = -1
+            }
+        }
+    }
+    let end_pos = p.data_position();
+    let payload_len = (end_pos - start_pos) as i32;
+    p.set_data_position(len_pos);
+    p.write_i32(payload_len)?;
+    p.set_data_position(end_pos);
+    crate::aparcel::boolean(p, false)?; // hasIntent = false
+    Ok(())
+}
+

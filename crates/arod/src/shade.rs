@@ -82,6 +82,7 @@ impl Shade {
     }
 
     /// Dismissing from the shade should also clear the host's toast/center copy.
+    #[allow(dead_code)]
     pub fn set_close_host(&self, f: CloseHost) {
         *self.close_host.lock().unwrap() = Some(f);
     }

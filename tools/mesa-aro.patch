@@ -1,0 +1,64 @@
+diff --git i/src/android_stub/hardware_stub.cpp w/src/android_stub/hardware_stub.cpp
+index 4cb973f..d8714c4 100644
+--- i/src/android_stub/hardware_stub.cpp
++++ w/src/android_stub/hardware_stub.cpp
+@@ -1,10 +1,17 @@
+ #include <hardware/hardware.h>
++#include <errno.h>
+ 
+ extern "C" {
+ 
+ int hw_get_module(const char *id, const struct hw_module_t **module)
+ {
+-   return 0;
++   return -ENOENT;
++}
++
++int hw_get_module_by_class(const char *class_id, const char *inst,
++                           const struct hw_module_t **module)
++{
++   return -ENOENT;
+ }
+ 
+ }
+diff --git i/src/android_stub/meson.build w/src/android_stub/meson.build
+index 0e3f27b..6a72110 100644
+--- i/src/android_stub/meson.build
++++ w/src/android_stub/meson.build
+@@ -1,6 +1,6 @@
+ if with_android_stub
+   stub_libs = []
+-  lib_names = ['hardware', 'log', 'nativewindow', 'sync']
++  lib_names = ['log', 'nativewindow', 'sync']
+ 
+   if with_libbacktrace
+     lib_names += ['backtrace']
+@@ -15,7 +15,14 @@ if with_android_stub
+     )
+   endforeach
+ 
++  hardware_stub = static_library(
++    'hardware_stub',
++    files('hardware_stub.cpp'),
++    include_directories : inc_include,
++    install : false,
++  )
++
+   dep_android = declare_dependency(
+-    link_with : stub_libs,
++    link_with : stub_libs + [hardware_stub],
+   )
+ endif
+diff --git i/src/util/u_gralloc/u_gralloc_fallback.c w/src/util/u_gralloc/u_gralloc_fallback.c
+index 44fb32d..c9327c7 100644
+--- i/src/util/u_gralloc/u_gralloc_fallback.c
++++ w/src/util/u_gralloc/u_gralloc_fallback.c
+@@ -142,7 +142,7 @@ fallback_gralloc_get_buffer_info(struct u_gralloc *gralloc,
+    }
+ 
+    out->drm_fourcc = drm_fourcc;
+-   out->modifier = DRM_FORMAT_MOD_INVALID;
++   out->modifier = DRM_FORMAT_MOD_LINEAR;
+    out->num_planes = num_planes;
+    out->fds[0] = hnd->handle->data[0];
+    out->strides[0] = stride;

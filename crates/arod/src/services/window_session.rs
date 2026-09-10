@@ -10,13 +10,30 @@ use rsbinder::{Parcel, Result, SIBinder, TransactionCode};
 use std::os::fd::{AsFd, FromRawFd, OwnedFd};
 use std::sync::{Arc, Mutex};
 
+#[derive(Clone)]
+pub struct WindowCanvas {
+    pub width: u32,
+    pub height: u32,
+    pub stride: u32,
+    pub pixels: Vec<u8>,
+}
+
 pub struct AppWindow {
     pub window: SIBinder,
     pub layer: Arc<Layer>,
     /// Our end of the input channel; the app holds the other.
     pub input_tx: OwnedFd,
+    #[allow(dead_code)]
     pub token: SIBinder,
     pub relaid_out: bool,
+    pub is_child: bool,
+    pub wtype: i32,
+    pub pos: Mutex<(i32, i32)>,
+    pub size: Mutex<(i32, i32)>,
+    pub frame: Mutex<Rect>,
+    pub canvas: Mutex<Option<WindowCanvas>>,
+    pub tag: Mutex<Option<String>>,
+    pub surface_layer_id: Mutex<Option<i32>>,
 }
 
 /// The host side of the app's window: current frame size (driven by the
@@ -63,23 +80,26 @@ impl WindowHost {
             }
             *s = (w, h);
         }
-        let frame = self.frame();
-        let windows: Vec<SIBinder> = self.windows.lock().unwrap().iter().map(|a| a.window.clone()).collect();
-        for window in windows {
-            if let Err(e) = self.send_resized(&window, frame) {
+        let display_frame = self.frame();
+        let windows: Vec<(SIBinder, Rect, bool)> = {
+            self.windows.lock().unwrap().iter().map(|a| (a.window.clone(), *a.frame.lock().unwrap(), a.is_child)).collect()
+        };
+        for (window, win_frame, is_child) in windows {
+            let f = if is_child { win_frame } else { display_frame };
+            if let Err(e) = self.send_resized(&window, f, display_frame) {
                 log::warn!("window: resized callback failed: {e}");
             }
         }
         log::info!("window: resized to {w}x{h} ({} window(s) notified)", self.windows.lock().unwrap().len());
     }
 
-    fn send_resized(&self, window: &SIBinder, frame: Rect) -> anyhow::Result<()> {
+    fn send_resized(&self, window: &SIBinder, frame: Rect, display_frame: Rect) -> anyhow::Result<()> {
         let proxy = window.as_proxy().ok_or_else(|| anyhow::anyhow!("IWindow is not a proxy"))?;
         let mut d = proxy.prepare_transact(true)?;
         // resized(in WindowRelayoutResult layout, boolean reportDraw, boolean forceLayout,
         //         int displayId, boolean syncWithBuffers, boolean dragResizing)
         d.write_i32(1)?; // typed WindowRelayoutResult present
-        self.write_relayout_result(&mut d, frame)?;
+        self.write_relayout_result(&mut d, frame, display_frame)?;
         ap::boolean(&mut d, true)?; // reportDraw
         ap::boolean(&mut d, true)?; // forceLayout
         d.write_i32(0)?; // displayId
@@ -87,6 +107,18 @@ impl WindowHost {
         ap::boolean(&mut d, false)?; // dragResizing
         proxy.submit_transact(IWINDOW_RESIZED, &d, rsbinder::FLAG_ONEWAY)?;
         Ok(())
+    }
+
+    pub fn refresh_input_fd(&self) {
+        let windows = self.windows.lock().unwrap();
+        if let Some(top) = windows.last() {
+            if let Ok(dup) = top.input_tx.try_clone() {
+                log::info!("window: set active input channel to layer {}", top.layer.id);
+                *self.input.fd.lock().unwrap() = Some(dup);
+                return;
+            }
+        }
+        *self.input.fd.lock().unwrap() = None;
     }
 
     fn find_layer(&self, window: &SIBinder) -> Option<Arc<Layer>> {
@@ -172,12 +204,12 @@ impl WindowHost {
     }
 
     /// android.view.WindowRelayoutResult body.
-    fn write_relayout_result(&self, p: &mut Parcel, frame: Rect) -> Result<()> {
-        let (w, h, dpi) = (frame.right - frame.left, frame.bottom - frame.top, self.dpi);
+    pub fn write_relayout_result(&self, p: &mut Parcel, frame: Rect, display_frame: Rect) -> Result<()> {
+        let (w, h, dpi) = (display_frame.right - display_frame.left, display_frame.bottom - display_frame.top, self.dpi);
         // ClientWindowFrames
         frame.write(p)?; // frame
-        frame.write(p)?; // displayFrame
-        frame.write(p)?; // parentFrame
+        display_frame.write(p)?; // displayFrame
+        display_frame.write(p)?; // parentFrame
         ap::typed_none(p)?; // attachedFrame
         ap::boolean(p, false)?; // isParentFrameClippedByDisplayCutout
         p.write_f32(1.0)?; // compatScale
@@ -189,7 +221,7 @@ impl WindowHost {
         cfg.write(p)?;
         {
             let start = p.data_position();
-            Self::write_insets_state(p, frame)?;
+            Self::write_insets_state(p, display_frame)?;
             if std::env::var_os("ARO_DUMP_INSETS").is_some() {
                 let (bytes, _) = p.aro_debug_bytes();
                 let end = p.data_position();
@@ -202,7 +234,7 @@ impl WindowHost {
         p.write_i32(0)?; // empty InsetsSourceControl[]
         p.write_i32(0)?; // seq
         p.write_i32(-1)?; // syncSeqId
-        ap::typed(p, |p| write_activity_window_info(p, frame))?; // activityWindowInfo
+        ap::typed(p, |p| write_activity_window_info(p, display_frame))?; // activityWindowInfo
         ap::boolean(p, false) // usesSyncedInsetsAnimation
     }
 }
@@ -213,14 +245,69 @@ impl Service for WindowSession {
 
     fn handle(&self, name: &str, _code: TransactionCode, data: &mut Parcel, reply: &mut Parcel) -> Result<bool> {
         let host = &*self.host;
-        let frame = host.frame();
-        let (w, h) = (frame.right, frame.bottom);
+        let display_frame = host.frame();
+        let (host_w, host_h) = (display_frame.right, display_frame.bottom);
         match name {
             "addToDisplayAsUser" | "addToDisplay" => {
                 let window: Option<SIBinder> = data.read()?;
                 let Some(window) = window else { return Ok(false) };
-                // LayoutParams follows; its layout is large and not needed yet.
-                let layer = host.sf.create_layer("app-window", w as u32, h as u32);
+                let save_pos = data.data_position();
+                let mut wtype = 1;
+                let mut x = 0;
+                let mut y = 0;
+                let mut req_w = -1;
+                let mut req_h = -1;
+                let mut flags = 0;
+                if let Ok(has_attrs) = data.read_i32() {
+                    if has_attrs != 0 {
+                        req_w = data.read_i32().unwrap_or(-1);
+                        req_h = data.read_i32().unwrap_or(-1);
+                        x = data.read_i32().unwrap_or(0);
+                        y = data.read_i32().unwrap_or(0);
+                        wtype = data.read_i32().unwrap_or(1);
+                        flags = data.read_i32().unwrap_or(0);
+                        let priv_flags = data.read_i32().unwrap_or(0);
+                        let _soft = data.read_i32().unwrap_or(0);
+                        let _cutout = data.read_i32().unwrap_or(0);
+                        let gravity = data.read_i32().unwrap_or(0);
+                        let _hmargin = data.read_f32().unwrap_or(0.0);
+                        let _vmargin = data.read_f32().unwrap_or(0.0);
+                        let _format = data.read_i32().unwrap_or(0);
+                        let _anims = data.read_i32().unwrap_or(0);
+                        let _alpha = data.read_f32().unwrap_or(1.0);
+                        let _dim = data.read_f32().unwrap_or(0.0);
+                        let _sbright = data.read_f32().unwrap_or(0.0);
+                        let _bbright = data.read_f32().unwrap_or(0.0);
+                        let _rot = data.read_i32().unwrap_or(0);
+                        let _token: Option<SIBinder> = data.read().unwrap_or(None);
+                        let _ctx_token: Option<SIBinder> = data.read().unwrap_or(None);
+                        let _pkg: Option<String> = data.read().unwrap_or(None);
+                        let title: Option<String> = if let Ok(kind) = data.read_i32() {
+                            if kind == 1 {
+                                data.read().unwrap_or(None)
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        };
+                        log::info!("window: addToDisplay attrs: type={wtype} title={title:?} pos=({x},{y}) size={req_w}x{req_h} grav={gravity:#x} flags={flags:#x} priv={priv_flags:#x}");
+                    }
+                }
+                data.set_data_position(save_pos);
+                let has_base = host.windows.lock().unwrap().iter().any(|w| !w.is_child);
+                let is_dialog = has_base && (wtype == 2 || (flags & 2) != 0 || wtype == 1003);
+                let is_popup = wtype >= 1000 && wtype < 2000 && !is_dialog;
+                let is_child = is_popup || is_dialog;
+                let win_w = if is_dialog { host_w } else if req_w > 0 { req_w } else if is_popup { 392 } else { host_w };
+                let win_h = if is_dialog { host_h } else if req_h > 0 { req_h } else if is_popup { 192 } else { host_h };
+                let initial_frame = if is_popup {
+                    Rect { left: x, top: y, right: x + win_w, bottom: y + win_h }
+                } else {
+                    display_frame
+                };
+                let layer_name = if is_popup { "popup-window" } else if is_dialog { "dialog-window" } else { "app-window" };
+                let layer = host.sf.create_layer(layer_name, win_w as u32, win_h as u32);
                 let mut fds = [0i32; 2];
                 if unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_SEQPACKET | libc::SOCK_CLOEXEC, 0, fds.as_mut_ptr()) } != 0 {
                     return Err(rsbinder::StatusCode::Unknown);
@@ -231,7 +318,7 @@ impl Service for WindowSession {
                     *host.input.fd.lock().unwrap() = Some(dup);
                 }
                 let token = super::token::new_token("input-channel");
-                log::info!("window: addToDisplay -> layer {} with input channel", layer.id);
+                log::info!("window: addToDisplay -> layer {} (child={is_child} dialog={is_dialog}) with input channel", layer.id);
                 ap::no_exception(reply)?;
                 // AddWindowResult (structured parcelable): size, relayoutResult(null), inputChannel, returnCode
                 reply.write_i32(1)?; // typed object present
@@ -246,7 +333,22 @@ impl Service for WindowSession {
                 reply.set_data_position(start);
                 reply.write_i32((end - start) as i32)?;
                 reply.set_data_position(end);
-                host.windows.lock().unwrap().push(AppWindow { window, layer, input_tx: ours, token, relaid_out: false });
+                host.windows.lock().unwrap().push(AppWindow {
+                    window,
+                    layer,
+                    input_tx: ours,
+                    token,
+                    relaid_out: false,
+                    is_child,
+                    wtype,
+                    pos: Mutex::new((if is_dialog { 0 } else { x }, if is_dialog { 0 } else { y })),
+                    size: Mutex::new((win_w, win_h)),
+                    frame: Mutex::new(initial_frame),
+                    canvas: Mutex::new(None),
+                    tag: Mutex::new(None),
+                    surface_layer_id: Mutex::new(None),
+                });
+                host.refresh_input_fd();
                 Ok(true)
             }
             "relayout" => {
@@ -256,18 +358,79 @@ impl Service for WindowSession {
                     log::warn!("window: relayout for unknown window");
                     return Ok(false);
                 };
-                log::info!("window: relayout -> layer {}", layer.id);
-                // In this image the client creates its own SurfaceControl (through our
-                // ISurfaceComposerClient) and passes it *in*; the reply is just
-                // [result int][WindowRelayoutResult].
-                // RELAYOUT_RES_SURFACE_CHANGED (2) | RELAYOUT_RES_FIRST_TIME (1): the
-                // client (re)creates its SurfaceControl and BLASTBufferQueue.
+                let save_pos = data.data_position();
+                let has_attrs = data.read_i32().unwrap_or(0) != 0;
+                let (cur_w, cur_h, cur_x, cur_y, cur_wtype);
+                let mut flags = 0;
+                if has_attrs {
+                    cur_w = data.read_i32().unwrap_or(0);
+                    cur_h = data.read_i32().unwrap_or(0);
+                    cur_x = data.read_i32().unwrap_or(0);
+                    cur_y = data.read_i32().unwrap_or(0);
+                    cur_wtype = data.read_i32().unwrap_or(0);
+                    flags = data.read_i32().unwrap_or(0);
+                    let _priv_flags = data.read_i32().unwrap_or(0);
+                    let _soft = data.read_i32().unwrap_or(0);
+                    let _cutout = data.read_i32().unwrap_or(0);
+                    let gravity = data.read_i32().unwrap_or(0);
+                    log::info!("window: relayout -> layer {} attrs: type={cur_wtype} pos=({cur_x},{cur_y}) size={cur_w}x{cur_h} grav={gravity:#x} flags={flags:#x}", layer.id);
+                } else {
+                    cur_w = data.read_i32().unwrap_or(0);
+                    cur_h = data.read_i32().unwrap_or(0);
+                    cur_x = 0;
+                    cur_y = 0;
+                    cur_wtype = 0;
+                    log::info!("window: relayout -> layer {} (no attrs), req={cur_w}x{cur_h}", layer.id);
+                }
+                data.set_data_position(save_pos);
+                let (win_frame, win_display_frame) = {
+                    let mut windows = host.windows.lock().unwrap();
+                    let has_base = windows.iter().any(|w| !w.is_child && Some(&w.window) != window.as_ref());
+                    let display_frame = host.frame();
+                    if let Some(app_win) = windows.iter_mut().find(|w| Some(&w.window) == window.as_ref()) {
+                        if has_attrs {
+                            if cur_wtype != 0 { app_win.wtype = cur_wtype; }
+                            let is_dialog = has_base && (app_win.wtype == 2 || (flags & 2) != 0 || app_win.wtype == 1003);
+                            let is_popup = app_win.wtype >= 1000 && app_win.wtype < 2000 && !is_dialog;
+                            app_win.is_child = is_popup || is_dialog;
+                            if is_dialog {
+                                *app_win.pos.lock().unwrap() = (0, 0);
+                                *app_win.size.lock().unwrap() = (host_w, host_h);
+                                *app_win.frame.lock().unwrap() = display_frame;
+                            } else if is_popup {
+                                *app_win.pos.lock().unwrap() = (cur_x, cur_y);
+                                let win_w = if cur_w > 0 { cur_w } else { 392 };
+                                let win_h = if cur_h > 0 { cur_h } else { 192 };
+                                *app_win.size.lock().unwrap() = (win_w, win_h);
+                                *app_win.frame.lock().unwrap() = Rect { left: cur_x, top: cur_y, right: cur_x + win_w, bottom: cur_y + win_h };
+                            } else {
+                                *app_win.pos.lock().unwrap() = (0, 0);
+                                *app_win.size.lock().unwrap() = (host_w, host_h);
+                                *app_win.frame.lock().unwrap() = display_frame;
+                            }
+                        } else if cur_w > 0 && cur_h > 0 {
+                            let is_dialog = app_win.is_child && *app_win.pos.lock().unwrap() == (0, 0);
+                            if !is_dialog {
+                                app_win.size.lock().unwrap().0 = cur_w;
+                                app_win.size.lock().unwrap().1 = cur_h;
+                                if app_win.is_child {
+                                    let (px, py) = *app_win.pos.lock().unwrap();
+                                    *app_win.frame.lock().unwrap() = Rect { left: px, top: py, right: px + cur_w, bottom: py + cur_h };
+                                }
+                            }
+                        }
+                        let f = *app_win.frame.lock().unwrap();
+                        (f, display_frame)
+                    } else {
+                        (display_frame, display_frame)
+                    }
+                };
                 let first = { let mut w = host.windows.lock().unwrap(); let e = w.iter_mut().find(|w| Some(&w.window) == window.as_ref()); e.map(|w| { let f = !w.relaid_out; w.relaid_out = true; f }).unwrap_or(true) };
                 let flags = if first { 2 | 1 } else { 0 };
                 ap::no_exception(reply)?;
                 reply.write_i32(flags)?; // result flags
                 reply.write_i32(1)?; // outRelayoutResult present
-                host.write_relayout_result(reply, frame)?;
+                host.write_relayout_result(reply, win_frame, win_display_frame)?;
                 Ok(true)
             }
             "relayoutAsync" => Ok(true), // oneway
@@ -276,7 +439,27 @@ impl Service for WindowSession {
                 reply.write(&Some(super::token::new_token("window-id")))?;
                 Ok(true)
             }
-            "remove" | "setInsets" | "prepareFrame" | "finishDrawing" | "updateRequestedVisibleTypes" | "updateAnimatingTypes" | "reportSystemGestureExclusionChanged" | "reportDecorViewGestureInterceptionChanged" | "reportKeepClearAreasChanged" | "setOnBackInvokedCallbackInfo" | "clearTouchableRegion" | "cancelDraw" | "pokeDrawLock" | "updateTapExcludeRegion" | "notifyImeWindowVisibilityChangedFromClient" | "onRectangleOnScreenRequested" | "setWallpaperPosition" | "setWallpaperZoomOut" | "setShouldZoomOutWallpaper" => {
+            "remove" => {
+                let window: Option<SIBinder> = data.read().ok().flatten();
+                if let Some(ref window) = window {
+                    let mut windows = host.windows.lock().unwrap();
+                    if let Some(pos) = windows.iter().position(|w| &w.window == window) {
+                        let removed = windows.remove(pos);
+                        log::info!("window: removed window layer {} (is_child={})", removed.layer.id, removed.is_child);
+                    }
+                    let top_window = windows.last().map(|w| (w.window.clone(), *w.frame.lock().unwrap(), w.is_child));
+                    drop(windows);
+                    host.refresh_input_fd();
+                    if let Some((top, win_frame, is_child)) = top_window {
+                        let display_frame = host.frame();
+                        let f = if is_child { win_frame } else { display_frame };
+                        let _ = host.send_resized(&top, f, display_frame);
+                    }
+                }
+                ap::no_exception(reply)?;
+                Ok(true)
+            }
+            "setInsets" | "prepareFrame" | "finishDrawing" | "updateRequestedVisibleTypes" | "updateAnimatingTypes" | "reportSystemGestureExclusionChanged" | "reportDecorViewGestureInterceptionChanged" | "reportKeepClearAreasChanged" | "setOnBackInvokedCallbackInfo" | "clearTouchableRegion" | "cancelDraw" | "pokeDrawLock" | "updateTapExcludeRegion" | "notifyImeWindowVisibilityChangedFromClient" | "onRectangleOnScreenRequested" | "setWallpaperPosition" | "setWallpaperZoomOut" | "setShouldZoomOutWallpaper" => {
                 log::debug!("window: {name} (no-op)");
                 ap::no_exception(reply).ok();
                 Ok(true)

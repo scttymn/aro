@@ -73,9 +73,10 @@ impl Buf {
 
 impl InputHub {
     /// Encode and send one single-pointer MotionEvent (a touch). `x`,`y` are in
-    /// the app's window coordinates. Returns false if there is no channel yet.
-    pub fn send_motion(&self, action: i32, x: f32, y: f32) -> bool {
-        let guard = self.fd.lock().unwrap();
+    /// the app's window coordinates, while `raw_x`,`raw_y` are display coordinates.
+    /// Returns false if there is no channel yet.
+    pub fn send_motion(&self, action: i32, x: f32, y: f32, raw_x: f32, raw_y: f32) -> bool {
+        let mut guard = self.fd.lock().unwrap();
         let Some(fd) = guard.as_ref() else {
             log::warn!("input: no input channel yet; dropping motion action={action}");
             return false;
@@ -112,7 +113,7 @@ impl InputHub {
         // Window transform: identity rotation/scale with translation carrying the
         // point (dsdx, dtdx, dtdy, dsdy, tx, ty). getX = dsdx*rawX + tx, and the
         // per-pointer raw values read as zero on this GSI build, so the point is
-        // delivered through tx/ty here and txRaw/tyRaw below. See note in send_motion.
+        // delivered through tx/ty here and txRaw/tyRaw below.
         for v in [1.0f32, 0.0, 0.0, 1.0, x, y] {
             b.f32(v);
         }
@@ -120,8 +121,8 @@ impl InputHub {
         b.f32(1.0); // yPrecision
         b.f32(f32::NAN); // xCursorPosition
         b.f32(f32::NAN); // yCursorPosition
-        // Raw (display) transform, same translation so getRawX/Y also resolve.
-        for v in [1.0f32, 0.0, 0.0, 1.0, x, y] {
+        // Raw (display) transform: translation carrying (raw_x, raw_y).
+        for v in [1.0f32, 0.0, 0.0, 1.0, raw_x, raw_y] {
             b.f32(v);
         }
         // pointers[0] (aligned 8; body is already 8-aligned here).
@@ -133,9 +134,9 @@ impl InputHub {
         let bits = (1u64 << AXIS_X) | (1 << AXIS_Y) | (1 << AXIS_PRESSURE);
         b.u64(bits);
         let mut vals = [0f32; 30];
-        vals[0] = x; // X
-        vals[1] = y; // Y
-        vals[2] = if action == ACTION_UP { 0.0 } else { 1.0 }; // PRESSURE
+        vals[0] = x;
+        vals[1] = y;
+        vals[2] = if action == ACTION_UP || action == ACTION_CANCEL { 0.0 } else { 1.0 }; // PRESSURE
         for v in vals {
             b.f32(v);
         }
@@ -150,13 +151,17 @@ impl InputHub {
         }
         let rc = unsafe { libc::send(fd.as_raw_fd(), b.0.as_ptr() as *const _, b.0.len(), libc::MSG_DONTWAIT | libc::MSG_NOSIGNAL) };
         if rc < 0 {
-            log::warn!("input: send failed: {}", std::io::Error::last_os_error());
+            let err = std::io::Error::last_os_error();
+            log::warn!("input: send failed: {err}");
+            if err.raw_os_error() == Some(libc::EPIPE) {
+                *guard = None;
+            }
             return false;
         }
         if rc as usize != b.0.len() {
             log::warn!("input: short send {rc} of {} bytes", b.0.len());
         }
-        log::debug!("input: motion action={action} ({x:.0},{y:.0}) seq={seq} ({} bytes)", b.0.len());
+        log::debug!("input: motion action={action} local=({x:.0},{y:.0}) raw=({raw_x:.0},{raw_y:.0}) seq={seq} ({} bytes)", b.0.len());
         true
     }
 
