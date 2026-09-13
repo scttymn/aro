@@ -9,7 +9,7 @@ use std::sync::{
 pub struct LocationService {
     pub host_uid: u32,
     pub setup: Option<Arc<crate::location_setup::HostSetup>>,
-    pub activity: Arc<super::activity::ActivityService>,
+    pub authority: SIBinder,
 }
 struct Cancellation(Arc<AtomicBool>);
 impl Service for Cancellation {
@@ -111,28 +111,14 @@ impl Service for LocationService {
                 request(data)?;
                 let callback: Option<SIBinder> = data.read()?;
                 let package: Option<String> = data.read()?;
-                // Android UIDs are currently emulated by seccomp. Use the actual
-                // Binder PID and attached foreground app, not a claimed parcel UID.
-                // Separate service-process location is intentionally unsupported.
-                let pid = rsbinder::thread_state::get_calling_pid();
-                let caller = if pid > 0
-                    && pid
-                        == self
-                            .activity
-                            .service_processes
-                            .app_pid
-                            .load(Ordering::Acquire)
-                {
-                    self.activity
-                        .attached
-                        .lock()
-                        .unwrap()
-                        .as_ref()
-                        .map(|(_, app)| app.clone())
-                        .filter(|app| package.as_deref() == Some(app.package.as_str()))
-                } else {
-                    None
-                };
+                // The supervisor validates the original Binder PID against the
+                // attached app. Only this worker may invoke that authority.
+                let caller_allowed = crate::host_services::validate_location_caller(
+                    &self.authority,
+                    rsbinder::thread_state::get_calling_pid(),
+                    package.as_deref(),
+                )
+                .unwrap_or(false);
                 let setup = self.setup.clone();
                 let canceled = Arc::new(AtomicBool::new(false));
                 ap::no_exception(reply)?;
@@ -143,13 +129,13 @@ impl Service for LocationService {
                         // First-use approval precedes dependency installation and host
                         // enablement. The desktop portal still gates delivery of a fix.
                         let result = (|| -> anyhow::Result<_> {
-                            let Some(caller) = caller else {
+                            if !caller_allowed {
                                 return Ok(None);
                             };
                             let Some(setup) = setup else {
                                 return Ok(None);
                             };
-                            if !setup.prepare(&caller.package, &canceled)? {
+                            if !setup.prepare(package.as_deref().unwrap_or(""), &canceled)? {
                                 return Ok(None);
                             }
                             crate::portal::location(uid, canceled.clone())

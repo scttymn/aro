@@ -17,6 +17,7 @@ mod dnsproxy;
 mod hostnet;
 mod portal;
 mod location_setup;
+mod host_services;
 mod shade;
 mod compositor;
 #[allow(dead_code)]
@@ -38,6 +39,18 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
+    /// Internal native Binder worker.
+    #[command(hide = true)]
+    HostService {
+        #[arg(value_enum)]
+        kind: host_services::Kind,
+        #[arg(long)]
+        binder: PathBuf,
+        #[arg(long)]
+        host_uid: u32,
+        #[arg(long)]
+        supervisor_pid: i32,
+    },
     /// Internal host-side first-use location helper (private stdio protocol).
     #[command(hide = true)]
     LocationHost,
@@ -77,6 +90,9 @@ enum Cmd {
 fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).format_timestamp_millis().init();
     let cli = Cli::parse();
+    if let Cmd::HostService { kind, binder, host_uid, supervisor_pid } = &cli.cmd {
+        return host_services::serve(*kind, binder, *host_uid, *supervisor_pid);
+    }
     if let Cmd::LocationHost = &cli.cmd { return location_setup::serve(); }
     // A desktop-entry request only writes host files; it needs no session or image.
     if let Cmd::DesktopEntry { apk } = &cli.cmd {
@@ -147,31 +163,23 @@ fn main() -> Result<()> {
     let registry = std::sync::Arc::new(services::registry::Registry { apps: std::sync::Mutex::new(Vec::new()), display });
     let pending_intents = pending_intent::Registry::new();
     let compat = std::sync::Arc::new(services::compat::PlatformCompatService::load(&layout.system, registry.clone()));
-    let settings_service = std::sync::Arc::new(services::settings::SettingsService::load(&layout.data));
-    let settings_provider = services::binder_of(services::settings::SettingsProvider {
-        service: settings_service.clone(),
-    });
-    let media_service = std::sync::Arc::new(services::media::MediaService::load(&layout.system, &layout.data));
-    let bulk_cursor = services::binder_of(services::cursor::BulkCursorService);
-    let media_provider = services::binder_of(services::media::MediaProvider {
-        service: media_service.clone(),
-        bulk_cursor,
-    });
-    let calendar_service = std::sync::Arc::new(services::calendar::CalendarService::load(&layout.data));
-    let calendar_bulk_cursor = services::binder_of(services::cursor::BulkCursorService);
-    let calendar_provider = services::binder_of(services::calendar::CalendarProvider {
-        service: calendar_service.clone(),
-        bulk_cursor: calendar_bulk_cursor,
-    });
+    let workers = host_services::Workers::new(hub_impl.clone(), binder_path.clone(), session.host_uid);
+    workers.spawn(host_services::Kind::SettingsProvider, None)?;
+    let settings_provider = workers.service(host_services::SETTINGS_PROVIDER)?;
+    workers.spawn(host_services::Kind::Audio, None)?;
+    workers.spawn(host_services::Kind::MediaProvider, None)?;
+    let media_provider = workers.service(host_services::MEDIA_PROVIDER)?;
+    let documents = workers.service(host_services::DOCUMENTS)?;
+    workers.spawn(host_services::Kind::CalendarProvider, None)?;
+    let calendar_provider = workers.service(host_services::CALENDAR_PROVIDER)?;
     let activity = std::sync::Arc::new(services::activity::ActivityService {
         registry: registry.clone(),
         host_uid: session.host_uid,
         compat: compat.clone(),
         settings_provider,
         media_provider,
-        media_service: media_service.clone(),
+        documents,
         calendar_provider,
-        calendar_service: calendar_service.clone(),
         pending: std::sync::Mutex::new(None),
         service_processes: services::service_processes::ServiceProcesses::default(),
         attached: std::sync::Mutex::new(None),
@@ -209,7 +217,6 @@ fn main() -> Result<()> {
     services::publish(&hub_impl, "window", services::window::WindowService { session: window_session });
     services::publish(&hub_impl, "input_method", services::input_method::InputMethodService);
     services::publish(&hub_impl, "input", services::input::InputService);
-    services::publish(&hub_impl, "audio", services::audio::AudioService);
     // Notifications go to whatever owns org.freedesktop.Notifications on the session bus.
     // The launched app's launcher icon, extracted from the APK and written to
     // the runtime icons dir, for the shade avatar. None → the widget shows a
@@ -246,9 +253,16 @@ fn main() -> Result<()> {
     services::publish(&hub_impl, "contextual_mode", services::modes::ModesService);
     // Network: mirror the host's connection (NetworkManager on the system bus).
     if let Err(e) = dnsproxy::serve(&session.sockets) { log::warn!("dnsproxyd: {e}"); }
-    services::publish(&hub_impl, "location", services::location::LocationService { host_uid: session.host_uid, setup: location_setup, activity: activity.clone() });
+    let location_worker_pid = std::sync::Arc::new(std::sync::atomic::AtomicI32::new(0));
+    services::publish(&hub_impl, host_services::LOCATION_AUTHORITY, host_services::LocationAuthority {
+        activity: std::sync::Arc::downgrade(&activity), worker_pid: location_worker_pid.clone(),
+    });
+    if let Some(setup) = location_setup {
+        let pid = workers.spawn(host_services::Kind::Location, Some(setup))?;
+        location_worker_pid.store(pid, std::sync::atomic::Ordering::Release);
+    }
     let hostnet = hostnet::probe(session.host_uid);
-    services::publish(&hub_impl, "connectivity", services::network::NetworkService { net: hostnet::monitor(session.host_uid, hostnet.clone()) });
+    workers.spawn(host_services::Kind::Connectivity, None)?;
     // The allocator is a VINTF-stable HAL binder; the mapper half is a bionic
     // library bound into the app at /vendor/lib64/hw/mapper.aro.so.
     hub_impl.register("android.hardware.graphics.allocator.IAllocator/default", services::vintf_binder_of(services::allocator::AllocatorService { gralloc: gralloc.clone() }));
@@ -261,14 +275,14 @@ fn main() -> Result<()> {
     services::publish(&hub_impl, "uimode", services::uimode::UiModeService);
     services::publish(&hub_impl, "power", services::power::PowerService);
     services::publish(&hub_impl, "thermalservice", services::thermal::ThermalService);
-    services::publish(&hub_impl, "clipboard", services::clipboard::ClipboardService::default());
+    workers.spawn(host_services::Kind::Clipboard, None)?;
     services::publish(&hub_impl, "content", services::content::ContentService);
-    services::publish(&hub_impl, "mount", services::storage::StorageService);
+    workers.spawn(host_services::Kind::Storage, None)?;
     services::publish(&hub_impl, "sensorservice", services::sensor::SensorService);
     services::publish(&hub_impl, "media.camera", services::camera::CameraService);
-    services::publish(&hub_impl, "media.player", services::media_player::MediaPlayerService);
-    services::publish(&hub_impl, "media.audio_flinger", services::audio_flinger::AudioFlingerService);
-    services::publish(&hub_impl, "media.audio_policy", services::audio_policy::AudioPolicyService);
+    workers.spawn(host_services::Kind::MediaPlayer, None)?;
+    workers.spawn(host_services::Kind::AudioFlinger, None)?;
+    workers.spawn(host_services::Kind::AudioPolicy, None)?;
     services::publish(&hub_impl, "package", services::package::PackageService { registry: registry.clone() });
     services::publish(&hub_impl, "platform_compat", services::compat::PlatformCompatRef(compat.clone()));
     services::publish(&hub_impl, "display", services::display::DisplayService { name: hd.name.clone(), width: hd.width, height: hd.height, dpi: hd.dpi(), callbacks: std::sync::Mutex::new(Vec::new()) });
@@ -287,6 +301,21 @@ fn main() -> Result<()> {
     // 4. Launch.
     let exe = std::env::current_exe()?.with_file_name("aro-exec");
     let mut cmd = std::process::Command::new(&exe);
+    // The ART launcher belongs to this supervisor just like the service workers.
+    // Its own parent-death handling then tears down the Android PID namespace.
+    let supervisor_pid = unsafe { libc::getpid() };
+    unsafe {
+        use std::os::unix::process::CommandExt;
+        cmd.pre_exec(move || {
+            if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL) != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            if libc::getppid() != supervisor_pid {
+                return Err(std::io::Error::other("supervisor exited before app launch"));
+            }
+            Ok(())
+        });
+    }
     cmd.env(Session::ENV_BINDERFS, &session.binderfs).env(Session::ENV_SOCKETS, &session.sockets);
     if let Some(v) = &vendor_dir {
         cmd.env("ARO_VENDOR_DIR", v);
@@ -310,7 +339,7 @@ fn main() -> Result<()> {
         Cmd::Shell => {
             cmd.arg("shell");
         }
-        Cmd::LocationHost | Cmd::DesktopEntry { .. } | Cmd::Open { .. } | Cmd::Install { .. } | Cmd::Pick => unreachable!("handled before session setup"),
+        Cmd::HostService { .. } | Cmd::LocationHost | Cmd::DesktopEntry { .. } | Cmd::Open { .. } | Cmd::Install { .. } | Cmd::Pick => unreachable!("handled before session setup"),
         Cmd::App { apk, activity: main_activity, url } => {
             let apk = apk.canonicalize()?;
             let name = apk.file_name().unwrap().to_string_lossy().into_owned();
@@ -357,6 +386,7 @@ fn main() -> Result<()> {
     }
     let status = cmd.status().with_context(|| format!("spawning {}", exe.display()))?;
     log::info!("arod: app exited with {status}");
+    drop(workers);
     std::process::exit(status.code().unwrap_or(1));
 }
 

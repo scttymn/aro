@@ -23,10 +23,8 @@ pub struct ActivityService {
     pub client_controller: Mutex<Option<SIBinder>>,
     pub settings_provider: SIBinder,
     pub media_provider: SIBinder,
-    pub media_service: Arc<super::media::MediaService>,
+    pub documents: SIBinder,
     pub calendar_provider: SIBinder,
-    #[allow(dead_code)]
-    pub calendar_service: Arc<super::calendar::CalendarService>,
     /// Deep-link URI for the initial launch (arod app --url); ACTION_VIEW instead of MAIN.
     pub launch_url: std::sync::Mutex<Option<String>>,
     /// PendingIntents minted via getIntentSender (for notification tap-back).
@@ -202,16 +200,11 @@ impl ActivityService {
             log::warn!("activity: open_document with no attached thread");
             return;
         };
-        let media_service = self.media_service.clone();
-
-        let host_uid = self.host_uid;
+        let documents = self.documents.clone();
         std::thread::spawn(move || {
             log::info!("activity: opening file-chooser portal");
-            let (result_code, uri_str) = match crate::portal::open_file(host_uid, &spec.package, mime.as_deref()) {
-                Ok(Some(path)) => match media_service.select_document(path) {
-                    Ok(uri) => (-1, Some(uri)),
-                    Err(e) => { log::warn!("activity: selected document unavailable: {e}"); (0, None) }
-                },
+            let (result_code, uri_str) = match crate::host_services::choose_document(&documents, &spec.package, mime.as_deref()) {
+                Ok(Some(uri)) => (-1, Some(uri)),
                 Ok(None) => (0, None),
                 Err(e) => { log::warn!("activity: file-chooser portal failed: {e}"); (0, None) }
             };

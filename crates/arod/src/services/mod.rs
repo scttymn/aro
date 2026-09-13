@@ -82,6 +82,12 @@ impl<S: Service> Remotable for Raw<S> {
     }
 
     fn on_transact(&self, code: TransactionCode, data: &mut Parcel, reply: &mut Parcel) -> Result<()> {
+        // Binder metadata (notably INTERFACE_TRANSACTION) belongs to the
+        // transport. Permissive service stubs must not swallow descriptor queries
+        // when another process imports their binder.
+        if !(rsbinder::FIRST_CALL_TRANSACTION..=rsbinder::LAST_CALL_TRANSACTION).contains(&code) {
+            return Err(StatusCode::UnknownTransaction);
+        }
         let name = name_of(S::TABLE, code);
         let pid = rsbinder::thread_state::get_calling_pid();
         match self.0.handle(name, code, data, reply) {
@@ -123,4 +129,16 @@ pub fn publish<S: Service>(hub: &crate::hub::Hub, name: &str, service: S) -> rsb
     hub.register(name, sibinder.clone());
     log::info!("service {name} ({}) published", S::DESCRIPTOR);
     sibinder
+}
+
+#[cfg(test)]
+mod transport_tests {
+    use super::*;
+    #[test]
+    fn permissive_stubs_leave_binder_metadata_to_the_transport() {
+        let stub = Raw(audio::AudioService);
+        let mut reply = Parcel::new();
+        assert_eq!(stub.on_transact(rsbinder::INTERFACE_TRANSACTION, &mut Parcel::new(), &mut reply), Err(StatusCode::UnknownTransaction));
+        assert_eq!(reply.data_size(), 0);
+    }
 }

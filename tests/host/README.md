@@ -23,6 +23,7 @@ For repeatable non-interactive invocation of individual Android calls:
 target/debug/arod app target/host/host.apk --url arotest://record
 target/debug/arod app target/host/host.apk --url arotest://host
 target/debug/arod app target/host/host.apk --url arotest://location
+target/debug/arod app target/host/host.apk --url arotest://isolation
 ```
 
 `record` accesses the default microphone for two seconds. Its private output is
@@ -36,3 +37,8 @@ Administrator authentication and the portal's own permission UI may appear after
 Allow. Coordinates are not printed. Only run one instance of this package at a time.
 
 See [M4 implementation and verification](../../docs/HOST-CAPABILITIES.md).
+
+`isolation` checks eleven distinct service PIDs, calendar/settings provider reads,
+rejection of direct document-control access, and a forged location caller returning
+no fix. It does not request location permission or install anything. Expected
+markers and controlled failure checks are in [Service isolation](../../docs/SERVICE-ISOLATION.md).

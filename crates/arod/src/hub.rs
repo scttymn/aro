@@ -14,13 +14,35 @@ use std::sync::Mutex;
 
 #[derive(Default)]
 pub struct Hub {
-    services: Mutex<BTreeMap<String, SIBinder>>,
+    services: Mutex<BTreeMap<String, (SIBinder, i32)>>,
+    reserved: Mutex<BTreeMap<String, i32>>,
     waiters: Mutex<Vec<(String, Strong<dyn IServiceCallback>)>>,
 }
 
 impl Hub {
+    pub fn reserve(&self, names: &[&str], pid: i32) {
+        let mut reserved = self.reserved.lock().unwrap();
+        for name in names { reserved.insert((*name).into(), pid); }
+    }
+
+    pub fn owned_service(&self, name: &str, pid: i32) -> Option<SIBinder> {
+        self.services.lock().unwrap().get(name)
+            .filter(|(_, owner)| *owner == pid).map(|(binder, _)| binder.clone())
+    }
+
+    pub fn remove_process(&self, pid: i32) {
+        // Retire reservations before removal. An addService already queued by
+        // the dying process must not put its dead binder back into the registry.
+        let mut reserved = self.reserved.lock().unwrap();
+        for owner in reserved.values_mut() { if *owner == pid { *owner = 0; } }
+        self.services.lock().unwrap().retain(|name, (_, owner)| {
+            if *owner == pid { log::warn!("hub: withdrawing {name} after worker {pid} exited"); }
+            *owner != pid
+        });
+    }
+
     fn lookup(&self, what: &str, name: &str) -> Option<SIBinder> {
-        let found = self.services.lock().unwrap().get(name).cloned();
+        let found = self.services.lock().unwrap().get(name).map(|(b, _)| b.clone());
         let pid = rsbinder::thread_state::get_calling_pid();
         match &found {
             Some(_) => log::info!("hub: {what} {name:?} from pid {pid}: ok"),
@@ -30,13 +52,21 @@ impl Hub {
     }
 
     pub fn register(&self, name: &str, binder: SIBinder) {
-        self.services.lock().unwrap().insert(name.to_string(), binder.clone());
+        self.register_owned(name, binder, std::process::id() as i32);
+    }
+
+    fn register_owned(&self, name: &str, binder: SIBinder, pid: i32) -> bool {
+        let reserved = self.reserved.lock().unwrap();
+        if reserved.get(name).is_some_and(|owner| *owner != pid) { return false; }
+        self.services.lock().unwrap().insert(name.to_string(), (binder.clone(), pid));
+        drop(reserved);
         let waiters: Vec<_> = self.waiters.lock().unwrap().iter().filter(|(n, _)| n == name).map(|(_, cb)| cb.clone()).collect();
         for cb in waiters {
             if let Err(e) = cb.onRegistration(name, &binder) {
                 log::warn!("hub: onRegistration({name}) failed: {e:?}");
             }
         }
+        true
     }
 }
 
@@ -68,6 +98,41 @@ impl IServiceManager for HubRef {
 /// allocator service and the passthrough mapper library `mapper.aro.so`.
 pub const DECLARED_HALS: &[&str] = &["android.hardware.graphics.allocator.IAllocator/default", "mapper/aro"];
 
+#[cfg(test)]
+mod worker_tests {
+    use super::*;
+    #[test]
+    fn failed_worker_withdraws_only_its_own_binders() {
+        let hub = Hub::default();
+        hub.register_owned("audio", crate::services::token::new_token("audio"), 42);
+        hub.register_owned("network", crate::services::token::new_token("network"), 43);
+        hub.remove_process(42);
+        assert!(hub.owned_service("audio", 42).is_none());
+        assert!(hub.owned_service("network", 43).is_some());
+        let info = hub.getServiceDebugInfo().unwrap();
+        assert_eq!(info.len(), 1);
+        assert_eq!(info[0].debugPid, 43);
+    }
+    #[test]
+    fn old_worker_exit_does_not_remove_a_replacement() {
+        let hub = Hub::default();
+        hub.register_owned("audio", crate::services::token::new_token("old"), 42);
+        hub.register_owned("audio", crate::services::token::new_token("new"), 43);
+        hub.remove_process(42);
+        assert!(hub.owned_service("audio", 43).is_some());
+    }
+    #[test]
+    fn reservations_reject_other_processes_and_late_dead_worker_registration() {
+        let hub = Hub::default();
+        hub.reserve(&["audio"], 42);
+        assert!(!hub.register_owned("audio", crate::services::token::new_token("wrong"), 43));
+        assert!(hub.register_owned("audio", crate::services::token::new_token("right"), 42));
+        hub.remove_process(42);
+        assert!(!hub.register_owned("audio", crate::services::token::new_token("late"), 42));
+        assert!(hub.owned_service("audio", 42).is_none());
+    }
+}
+
 impl Interface for Hub {}
 
 impl IServiceManager for Hub {
@@ -85,7 +150,10 @@ impl IServiceManager for Hub {
     }
     fn addService(&self, name: &str, service: &SIBinder, _allow_isolated: bool, _dump_priority: i32) -> BinderResult<()> {
         log::info!("hub: addService {name:?} from pid {}", rsbinder::thread_state::get_calling_pid());
-        self.register(name, service.clone());
+        let pid = rsbinder::thread_state::get_calling_pid();
+        if !self.register_owned(name, service.clone(), pid) {
+            return Err(rsbinder::StatusCode::PermissionDenied.into());
+        }
         Ok(())
     }
     fn listServices(&self, _dump_priority: i32) -> BinderResult<Vec<String>> {
@@ -93,7 +161,7 @@ impl IServiceManager for Hub {
     }
     fn registerForNotifications(&self, name: &str, callback: &Strong<dyn IServiceCallback>) -> BinderResult<()> {
         log::info!("hub: registerForNotifications {name:?}");
-        if let Some(b) = self.services.lock().unwrap().get(name).cloned() {
+        if let Some((b, _)) = self.services.lock().unwrap().get(name).cloned() {
             callback.onRegistration(name, &b)?;
         }
         self.waiters.lock().unwrap().push((name.to_string(), callback.clone()));
@@ -123,11 +191,14 @@ impl IServiceManager for Hub {
     fn registerClientCallback(&self, _name: &str, _service: &SIBinder, _callback: &Strong<dyn IClientCallback>) -> BinderResult<()> {
         Ok(())
     }
-    fn tryUnregisterService(&self, name: &str, _service: &SIBinder) -> BinderResult<()> {
-        self.services.lock().unwrap().remove(name);
+    fn tryUnregisterService(&self, name: &str, service: &SIBinder) -> BinderResult<()> {
+        let mut services = self.services.lock().unwrap();
+        if services.get(name).is_some_and(|(binder, pid)| binder == service && *pid == rsbinder::thread_state::get_calling_pid()) {
+            services.remove(name);
+        }
         Ok(())
     }
     fn getServiceDebugInfo(&self) -> BinderResult<Vec<ServiceDebugInfo>> {
-        Ok(self.services.lock().unwrap().keys().map(|n| ServiceDebugInfo { name: n.clone(), debugPid: 0 }).collect())
+        Ok(self.services.lock().unwrap().iter().map(|(n, (_, pid))| ServiceDebugInfo { name: n.clone(), debugPid: *pid }).collect())
     }
 }

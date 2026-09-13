@@ -165,7 +165,7 @@ Six additional first-use policy tests cover denial without side effects, remembe
 decisions, confirmation before installation, existing packages, install failure,
 cancellation and preserving a subsequent host disable. These use fake backends.
 
-`cargo test --workspace`: **52 passed**. Build and `git diff --check` pass.
+`cargo test --workspace`: **56 passed** after service isolation. Build and `git diff --check` pass.
 Private-bus tests require `dbus-daemon` and never connect to the user's session bus.
 The tests cover network parcels/state changes, recorder parameters, selected-file
 lookup, location parcel fields, intent matching and desktop quoting/path mapping.
@@ -173,8 +173,13 @@ Artifacts are under `target/host/validation/`: Android logs, captures, launcher
 checks and recording format metadata. Test windows and capture processes were
 closed; generated home-directory fixtures and microphone recordings were removed.
 
-The original milestone's separate-service-process and per-AIDL fuzz-target goals
-are not delivered by this change: services still share the existing arod process,
-and the new coverage is unit and live integration testing. Per-app enforcement
-remains M6. This document records functional exit checks, not complete Android API
-coverage or readiness to ship the development image.
+September 12: eleven native host service workers now isolate network, audio,
+storage/providers, clipboard and location from the supervisor. Android provider
+queries, file selection, recording/playback and WebView were rechecked. A killed
+network worker did not take down the supervisor or unrelated workers; supervisor
+death cleaned up the complete tracked process tree. See [Service isolation](SERVICE-ISOLATION.md)
+for the exact service mapping and remaining coordinator-owned services.
+
+Per-AIDL fuzz targets remain pending, and per-app enforcement remains M6. Process
+separation does not restrict a worker's existing host-user privileges. This document
+records functional exit checks, not complete Android API coverage or readiness to ship.

@@ -24,6 +24,24 @@ pub struct HostSetup {
     child: Option<Child>,
 }
 impl HostSetup {
+    pub fn duplicate_socket(&self) -> Result<OwnedFd> {
+        Ok(self.socket.lock().unwrap().try_clone()?.into())
+    }
+
+    pub fn from_socket(socket: UnixStream) -> Result<Self> {
+        socket.set_read_timeout(Some(Duration::from_millis(100)))?;
+        Ok(Self {
+            socket: Mutex::new(socket),
+            child: None,
+        })
+    }
+
+    pub fn shutdown(&self) {
+        if let Ok(socket) = self.socket.lock() {
+            let _ = socket.shutdown(std::net::Shutdown::Both);
+        }
+    }
+
     /// No threads are started in the supervisor: session::enter must stay single-threaded.
     pub fn spawn() -> Result<Self> {
         let (client, server) = UnixStream::pair()?;

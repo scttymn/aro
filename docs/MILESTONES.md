@@ -17,7 +17,7 @@ capabilities; services grow enforcement once the display path is proven.
 | M1 | done: `app_process64` ran `net.sourceforge.opencamera.MainActivity.useScopedStorage()` from the unmodified Open Camera APK, result `true`, 1.1 s wall | 2026-09-07 |
 | M2 | done: `arod app target/hello/hello.apk` runs the test app's real `ActivityThread` lifecycle through ARO's Rust services; `HelloARO: onCreate / onStart / onResume` logged. Open Camera reaches `MainActivity.onCreate` too. | 2026-09-08 |
 | M3 | done (2026-09-10): hardware Vulkan HAL (`vulkan.aro.so`), GBM hardware allocator, explicit sync file waiting, Wayland `zwp_linux_dmabuf_v1` zero-copy presentation, multi-activity transitions verified on hello.apk, DeskClock, Calendar. | 2026-09-10 |
-| M4 | Functional exits M4a–c pass: playback/recording, NetworkManager + HTTPS, private/shared storage + portal picker. Desktop launchers/menu and intent bridge verified. M4d location consent/fix awaits host setup; service isolation/fuzz scope remains open. | 2026-09-11 |
+| M4 | Functional exits M4a–c pass. Desktop integration and eleven host service workers verified, including failure containment. M4d live GeoClue fix and per-AIDL fuzz targets remain pending. | 2026-09-12 |
 
 September 11 runtime update: kernel/Binder repaired; WebView runs with a separate
 renderer; local HTML/JavaScript and Browser2 HTTPS loading pass. Desktop keyboard,
@@ -125,6 +125,12 @@ Implementation & Verification:
 ## M4 — Host capabilities (subsystems 6, 7, 8, 9) — parallel
 
 Current verification and limitations: [Host capabilities](HOST-CAPABILITIES.md).
+
+September 12: [eleven host service workers](SERVICE-ISOLATION.md) now separate
+network, audio, storage/providers, clipboard and location from the supervisor.
+Android calls, worker failure and full process-tree shutdown are verified; 56
+workspace tests pass. Lifecycle/display/notification coordination remains in arod.
+Per-AIDL fuzz targets remain open.
 
 Each is one service process, one AIDL interface, one host API, with its own fuzz
 target and unit tests that run without Android.

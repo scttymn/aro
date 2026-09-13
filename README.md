@@ -6,6 +6,7 @@ and Hyprland through a modular service bus.
 - [Architecture](docs/ARCHITECTURE.md)
 - [Milestones](docs/MILESTONES.md)
 - [WebView](docs/WEBVIEW.md) and [desktop input](docs/DESKTOP-INPUT.md) — current runtime validation
+- [Service isolation](docs/SERVICE-ISOLATION.md) — native host workers and failure checks
 - [Runtime notes](docs/RUNTIME-NOTES.md) — what Android needs from the host, as discovered
 
 ## Roadmap
@@ -20,7 +21,7 @@ Full detail and exit criteria are in [docs/MILESTONES.md](docs/MILESTONES.md).
 | M1 Runtime | ART (`app_process64`) runs code from an unmodified APK in a user namespace, no root | ✅ done |
 | M2 Bus + Activity | Private binder bus, package/activity services; a real `ActivityThread` lifecycle reaches `onResume` | ✅ done |
 | M3 Display | Window session, composer, gralloc (allocator + `mapper.aro.so`), Wayland presenter; app draws into a Hyprland window, follows the tiled size, receives clicks | ✅ done |
-| M4 Host capabilities | Audio playback/recording → PipeWire ✅ · Network → NetworkManager + HTTPS ✅ · Storage + SAF picker ✅ · Desktop launchers and intent bridge ✅ · Location → GeoClue pending live verification; service isolation/fuzz targets remain | 🚧 in progress |
+| M4 Host capabilities | Audio playback/recording → PipeWire ✅ · Network → NetworkManager + HTTPS ✅ · Storage + SAF picker ✅ · Desktop launchers and intent bridge ✅ · Eleven host workers verified · Location → GeoClue pending live fix; fuzz targets remain | 🚧 in progress |
 | M5 Accounts + GMS | Accounts on libsecret; Play Services / Play Store as tenant apps; integrity outcome documented | ⏳ planned |
 | M6 Sandbox | Per-app user namespace, seccomp, Landlock from declared permissions; services enforce grants | ⏳ planned |
 | M7 ARM native libs | In-process arm64 translator so arm64-only APKs run | ⏳ planned |

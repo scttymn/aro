@@ -25,6 +25,56 @@ public class MainActivity extends Activity {
         if ("arotest://record".equals(test)) new android.os.Handler(getMainLooper()).postDelayed(() -> new Thread(this::record).start(), 1500);
         if ("arotest://host".equals(test)) new android.os.Handler(getMainLooper()).postDelayed(() -> startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("https://example.com/"))), 1500);
         if ("arotest://location".equals(test)) new android.os.Handler(getMainLooper()).postDelayed(this::locate, 1500);
+        if ("arotest://isolation".equals(test)) new android.os.Handler(getMainLooper()).postDelayed(() -> new Thread(this::isolation).start(), 1500);
+    }
+    android.os.IBinder service(String name) throws Exception {
+        return (android.os.IBinder)Class.forName("android.os.ServiceManager").getMethod("getService", String.class).invoke(null, name);
+    }
+    void isolation() {
+        try {
+            java.util.Set<Integer> pids = new java.util.HashSet<>();
+            String[] names = {"audio", "media.audio_flinger", "media.audio_policy", "media.player", "connectivity", "mount", "clipboard", "location", "aro.media.provider", "aro.calendar.provider", "aro.settings.provider"};
+            for (String name : names) {
+                android.os.IBinder binder = service(name);
+                android.os.Parcel data = android.os.Parcel.obtain(), reply = android.os.Parcel.obtain();
+                try {
+                    if (!binder.transact(0x5f504944, data, reply, 0)) throw new IOException("debug PID unsupported: " + name);
+                    int pid = reply.readInt();
+                    if (pid <= 0 || !pids.add(pid)) throw new IOException("services share a process: " + name);
+                    report("WORKER " + name + " pid=" + pid + " descriptor=" + binder.getInterfaceDescriptor());
+                } finally { data.recycle(); reply.recycle(); }
+            }
+            report("ISOLATION distinct_workers=" + pids.size());
+            try (android.database.Cursor c = getContentResolver().query(Uri.parse("content://com.android.calendar/calendars"), new String[]{"_id"}, null, null, null)) {
+                report("CALENDAR_PROVIDER readable=" + (c != null));
+            }
+            report("SETTINGS_PROVIDER readable=" + (android.provider.Settings.Global.getInt(getContentResolver(), "device_provisioned", 0) == 1));
+            // Direct calls to the supervisor-only file picker control must be rejected.
+            android.os.Parcel data = android.os.Parcel.obtain(), reply = android.os.Parcel.obtain();
+            try {
+                data.writeInterfaceToken("org.aro.IDocuments"); data.writeString(getPackageName()); data.writeString("text/plain");
+                service("aro.documents").transact(1, data, reply, 0);
+                report("DOCUMENT_CONTROL rejected=false");
+            } catch (SecurityException | android.os.RemoteException expected) { report("DOCUMENT_CONTROL rejected=true"); }
+            finally { data.recycle(); reply.recycle(); }
+            // Forge only the package name: the real caller PID must prevent this
+            // from reaching first-use consent, installation, or real geolocation.
+            android.os.Binder callback = new android.os.Binder() {
+                { attachInterface(null, "android.location.ILocationCallback"); }
+                protected boolean onTransact(int code, android.os.Parcel data, android.os.Parcel reply, int flags) throws android.os.RemoteException {
+                    if (code != 1) return super.onTransact(code, data, reply, flags);
+                    data.enforceInterface("android.location.ILocationCallback");
+                    report("LOCATION_INVALID_CALLER fix=" + (data.readInt() != 0));
+                    return true;
+                }
+            };
+            data = android.os.Parcel.obtain(); reply = android.os.Parcel.obtain();
+            try {
+                data.writeInterfaceToken("android.location.ILocationManager");
+                data.writeString("network"); data.writeInt(0); data.writeStrongBinder(callback); data.writeString("org.aro.invalid");
+                service("location").transact(2, data, reply, 0); reply.readException();
+            } finally { data.recycle(); reply.recycle(); }
+        } catch (Throwable e) { report("ISOLATION_FAIL=" + e); android.util.Log.e("AROHost", "isolation", e); }
     }
     void probe() {
         try {
