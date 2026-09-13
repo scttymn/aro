@@ -225,8 +225,8 @@ pub fn write_string_bundle(p: &mut rsbinder::Parcel, map: &[(&str, Option<&str>)
     p.write_i32(-1)?; // placeholder for length
     p.write_i32(BUNDLE_MAGIC)?;
     let start_pos = p.data_position();
-
     p.write_i32(map.len() as i32)?;
+
     for (k, v) in map {
         crate::aparcel::string16(p, Some(k))?;
         match v {
@@ -246,5 +246,23 @@ pub fn write_string_bundle(p: &mut rsbinder::Parcel, map: &[(&str, Option<&str>)
     p.set_data_position(end_pos);
     crate::aparcel::boolean(p, false)?; // hasIntent = false
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_print_rust_bundle_hex() {
+        let mut p = rsbinder::Parcel::new();
+        write_string_bundle(&mut p, &[("com.android.webview.WebViewLibrary", Some("libwebviewchromium.so"))]).unwrap();
+        let (bytes, _) = p.aro_debug_bytes();
+        let mut s = String::new();
+        for b in &bytes {
+            s.push_str(&format!("{b:02x} "));
+        }
+        println!("RUST BUNDLE HEX ({} bytes): {s}", bytes.len());
+        assert_eq!(bytes.len(), 144);
+    }
 }
 

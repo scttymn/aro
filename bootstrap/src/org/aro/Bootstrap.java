@@ -29,7 +29,8 @@ public final class Bootstrap {
         if (args.length >= 1 && args[0].equals("--app")) {
             System.out.println("aro: entering android.app.ActivityThread.main");
             Class<?> at = Class.forName("android.app.ActivityThread");
-            at.getMethod("main", String[].class).invoke(null, (Object) new String[0]);
+            at.getMethod("main", String[].class).invoke(null,
+                    (Object) java.util.Arrays.copyOfRange(args, 1, args.length));
             return;
         }
         if (args.length < 2) {

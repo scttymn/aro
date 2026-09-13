@@ -67,7 +67,19 @@ const SECCOMP_IOCTL_NOTIF_RECV: u64 = ioctl_iowr(b'!', 0, std::mem::size_of::<Se
 const SECCOMP_IOCTL_NOTIF_SEND: u64 = ioctl_iowr(b'!', 1, std::mem::size_of::<SeccompNotifResp>());
 
 /// Syscalls the supervisor handles.
-const SUPERVISED: &[i64] = &[libc::SYS_setpriority];
+const SUPERVISED: &[i64] = &[
+    libc::SYS_setpriority,
+    libc::SYS_getuid,
+    libc::SYS_geteuid,
+    libc::SYS_getgid,
+    libc::SYS_getegid,
+];
+
+fn app_uid() -> i64 {
+    static UID: std::sync::OnceLock<i64> = std::sync::OnceLock::new();
+    *UID.get_or_init(|| std::env::var("ARO_APP_UID").ok()
+        .and_then(|s| s.parse().ok()).unwrap_or(10001))
+}
 
 /// Install the filter in the calling process (before exec). Returns the
 /// listener fd the supervisor must service. Applies to all future threads
@@ -116,6 +128,12 @@ pub fn serve_one(listener: RawFd) -> Result<bool> {
             } else {
                 resp.flags = SECCOMP_USER_NOTIF_FLAG_CONTINUE;
             }
+        }
+        libc::SYS_getuid | libc::SYS_geteuid => {
+            resp.val = app_uid();
+        }
+        libc::SYS_getgid | libc::SYS_getegid => {
+            resp.val = app_uid();
         }
         _ => resp.flags = SECCOMP_USER_NOTIF_FLAG_CONTINUE,
     }

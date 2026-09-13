@@ -17,7 +17,12 @@ capabilities; services grow enforcement once the display path is proven.
 | M1 | done: `app_process64` ran `net.sourceforge.opencamera.MainActivity.useScopedStorage()` from the unmodified Open Camera APK, result `true`, 1.1 s wall | 2026-09-07 |
 | M2 | done: `arod app target/hello/hello.apk` runs the test app's real `ActivityThread` lifecycle through ARO's Rust services; `HelloARO: onCreate / onStart / onResume` logged. Open Camera reaches `MainActivity.onCreate` too. | 2026-09-08 |
 | M3 | done (2026-09-10): hardware Vulkan HAL (`vulkan.aro.so`), GBM hardware allocator, explicit sync file waiting, Wayland `zwp_linux_dmabuf_v1` zero-copy presentation, multi-activity transitions verified on hello.apk, DeskClock, Calendar. | 2026-09-10 |
-| M4 | in progress (2026-09-10): M4a audio playback verified on PipeWire (`Music.apk`), M4c MediaStore & CalendarProvider verified (`Gallery2.apk`, `Calendar.apk`), DeskClock alarm scheduling verified. | 2026-09-10 |
+| M4 | Functional exits M4a–c pass: playback/recording, NetworkManager + HTTPS, private/shared storage + portal picker. Desktop launchers/menu and intent bridge verified. M4d location consent/fix awaits host setup; service isolation/fuzz scope remains open. | 2026-09-11 |
+
+September 11 runtime update: kernel/Binder repaired; WebView runs with a separate
+renderer; local HTML/JavaScript and Browser2 HTTPS loading pass. Desktop keyboard,
+window focus, wheel scrolling and plain-text clipboard exchange are implemented
+and tested. See [WebView](WEBVIEW.md) and [Desktop input](DESKTOP-INPUT.md).
 
 ## M0 — Workspace
 
@@ -119,15 +124,17 @@ Implementation & Verification:
 
 ## M4 — Host capabilities (subsystems 6, 7, 8, 9) — parallel
 
+Current verification and limitations: [Host capabilities](HOST-CAPABILITIES.md).
+
 Each is one service process, one AIDL interface, one host API, with its own fuzz
 target and unit tests that run without Android.
 
-- **M4a Audio** — exit: an app plays sound through PipeWire and records from the default source. Verified: `Music.apk` / `AudioPreview` plays audio through PipeWire via `MediaPlayerService` / `mpv` with playback controls.
-- **M4b Network** — exit: an app performs an HTTPS request and `ConnectivityManager` reports a validated network mirrored from NetworkManager.
-- **M4c Storage & Providers** — exit: an app saves to its private dir, reads `/sdcard` mapped to the home directory, and a Storage Access Framework picker opens the file-chooser portal. Verified: `MediaStore` indexes host picture directories for `Gallery2.apk`; `CalendarProvider` supports full event queries, recurring instance expansions, batch CUD operations (`applyBatch`), and JSON persistence for `Calendar.apk`.
-- **M4d Location** — exit: an app receives a fix from GeoClue and the permission prompt gates it.
+- **M4a Audio** — exit: an app plays sound through PipeWire and records from the default source. Verified: `Music.apk` / `AudioPreview` plays audio through PipeWire via `MediaPlayerService` / `mpv` with playback controls. September 11: default-source PipeWire recording into an Android MediaRecorder output file also passes (AAC, 44100/48000 Hz).
+- **M4b Network** — exit: an app performs an HTTPS request and `ConnectivityManager` reports a validated network mirrored from NetworkManager. **Exit verified September 11:** active validated Wi-Fi, correct metering, HTTPS 200; state refreshes every two seconds.
+- **M4c Storage & Providers** — exit: an app saves to its private dir, reads `/sdcard` mapped to the home directory, and a Storage Access Framework picker opens the file-chooser portal. Verified: `MediaStore` indexes host picture directories for `Gallery2.apk`; `CalendarProvider` supports full event queries, recurring instance expansions, batch CUD operations (`applyBatch`), and JSON persistence for `Calendar.apk`. **Exit verified September 11:** private-file read/write, host fixture read through `/sdcard`, native portal selection/MIME/metadata/read and cancellation.
+- **M4d Location** — exit: an app receives a fix from GeoClue and the permission prompt gates it. **Pending actual fix:** first-use consent now precedes optional GeoClue installation and disclosed host enablement. September 12: user denied the live Android prompt; no package or setting changed and Android received no fix. Allow/install is tested with fake backends; real installation and a GeoClue fix remain unverified. `aro location install/status` also supports manual setup. Private-bus and first-use tests cover gating, cancellation, timeout, install failure and cleanup (52 workspace tests pass).
 
-Also in M4: host-side intent bridge (an app opens a URL → Omarchy browser; `aro open <url|file>` → Android), desktop entries with real icons, Omarchy menu block (port from `~/Work/omadroid`).
+Also in M4: host-side intent bridge (an app opens a URL → Omarchy browser; `aro open <url|file>` → Android), desktop entries with real icons, Omarchy menu block (port from `~/Work/omadroid`). **Verified September 11:** host browser via OpenURI portal, inbound HTTPS/file URLs, persistent Browser2 install with real icon, desktop launcher, and Omarchy menu block. See `bin/aro` and `tools/install-desktop.sh`.
 
 ## M5 — Accounts and GMS (subsystem 10)
 
@@ -154,5 +161,5 @@ Exit: an arm64-only APK runs to its first frame.
 
 ## Later
 
-Notifications, clipboard, drag and drop, IME integration, camera, Bluetooth,
+Rich clipboard formats, proactive host clipboard notifications, drag and drop, IME integration, camera, Bluetooth,
 multi-user, packaging for Omarchy (`omarchy install aro`).

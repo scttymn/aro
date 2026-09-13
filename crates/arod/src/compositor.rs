@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::os::fd::{AsFd, AsRawFd, FromRawFd, OwnedFd};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
-use wayland_client::protocol::{wl_buffer, wl_compositor, wl_output, wl_pointer, wl_region, wl_registry, wl_seat, wl_shm, wl_shm_pool, wl_surface};
+use wayland_client::protocol::{wl_buffer, wl_compositor, wl_output, wl_keyboard, wl_pointer, wl_region, wl_registry, wl_seat, wl_shm, wl_shm_pool, wl_surface};
 use wayland_client::{Connection, Dispatch, QueueHandle};
 use wayland_protocols::wp::linux_dmabuf::zv1::client::{
     zwp_linux_buffer_params_v1::{self, ZwpLinuxBufferParamsV1},
@@ -251,9 +251,14 @@ struct App {
     host: Arc<WindowHost>,
     seat: Option<wl_seat::WlSeat>,
     pointer: Option<wl_pointer::WlPointer>,
+    keyboard: Option<wl_keyboard::WlKeyboard>,
+    keys: crate::keyboard::Keyboard,
     ptr_x: f32,
     ptr_y: f32,
     ptr_down: bool,
+    scroll_values: [f64; 2],
+    scroll_discrete: [Option<i32>; 2],
+    scroll_finger: bool,
     over_surface: bool,
     down_layer_id: Option<i32>,
     active_base_layer_id: Option<i32>,
@@ -263,6 +268,24 @@ struct App {
 }
 
 impl App {
+    fn send_scroll_frame(&mut self) {
+        let divisor = if self.scroll_finger { 64.0 } else { 10.0 };
+        let values: [f32; 2] = std::array::from_fn(|i| {
+            self.scroll_discrete[i].map(|n| n as f32).unwrap_or((self.scroll_values[i] / divisor) as f32)
+        });
+        self.scroll_values = [0.0; 2];
+        self.scroll_discrete = [None; 2];
+        self.scroll_finger = false;
+        if values == [0.0; 2] || !self.over_surface { return; }
+        let windows = self.host.windows.lock().unwrap();
+        if let Some(top) = windows.last() {
+            let (dx, dy) = if top.is_child { *top.pos.lock().unwrap() } else { (0, 0) };
+            if let Ok(fd) = top.input_tx.try_clone() { self.input.select_channel(Some(fd), top.layer.id); }
+            self.input.send_scroll(self.ptr_x - dx as f32, self.ptr_y - dy as f32,
+                self.ptr_x, self.ptr_y, -values[0], values[1]);
+        }
+    }
+
     fn send_pointer_motion(&mut self, action: i32, screen_x: f32, screen_y: f32) -> bool {
         let windows = self.host.windows.lock().unwrap();
         if action == ACTION_DOWN {
@@ -275,7 +298,7 @@ impl App {
                     (screen_x, screen_y)
                 };
                 if let Ok(dup) = top.input_tx.try_clone() {
-                    *self.input.fd.lock().unwrap() = Some(dup);
+                    self.input.select_channel(Some(dup), top.layer.id);
                 }
                 drop(windows);
                 return self.input.send_motion(action, local_x, local_y, screen_x, screen_y);
@@ -292,7 +315,7 @@ impl App {
                     (screen_x, screen_y)
                 };
                 if let Ok(dup) = w.input_tx.try_clone() {
-                    *self.input.fd.lock().unwrap() = Some(dup);
+                    self.input.select_channel(Some(dup), w.layer.id);
                 }
                 if action == ACTION_UP || action == ACTION_CANCEL {
                     self.down_layer_id = None;
@@ -399,9 +422,14 @@ fn run(conn: Connection, rx: Receiver<Frame>, app_id: String, title: String, inp
         host,
         seat: None,
         pointer: None,
+        keyboard: None,
+        keys: crate::keyboard::Keyboard::default(),
         ptr_x: 0.0,
         ptr_y: 0.0,
         ptr_down: false,
+        scroll_values: [0.0; 2],
+        scroll_discrete: [None; 2],
+        scroll_finger: false,
         over_surface: false,
         down_layer_id: None,
         active_base_layer_id: None,
@@ -753,6 +781,7 @@ fn run(conn: Connection, rx: Receiver<Frame>, app_id: String, title: String, inp
                 }
             }
         }
+        if let Some(key) = app.keys.repeat() { app.input.send_key(key); }
         app.input.drain_finished();
         conn.flush()?;
         // Block briefly on Wayland events, but wake often to check the channel.
@@ -1094,10 +1123,44 @@ impl Dispatch<wl_seat::WlSeat, ()> for App {
     fn event(app: &mut Self, seat: &wl_seat::WlSeat, event: wl_seat::Event, _: &(), _: &Connection, qh: &QueueHandle<Self>) {
         if let wl_seat::Event::Capabilities { capabilities } = event {
             if let wayland_client::WEnum::Value(caps) = capabilities {
+                if caps.contains(wl_seat::Capability::Keyboard) && app.keyboard.is_none() {
+                    app.keyboard = Some(seat.get_keyboard(qh, ()));
+                } else if !caps.contains(wl_seat::Capability::Keyboard) {
+                    for key in app.keys.leave() { app.input.send_key(key); }
+                    app.input.set_focus(false);
+                    if let Some(keyboard) = app.keyboard.take() { keyboard.release(); }
+                }
                 if caps.contains(wl_seat::Capability::Pointer) && app.pointer.is_none() {
                     app.pointer = Some(seat.get_pointer(qh, ()));
                 }
             }
+        }
+    }
+}
+
+impl Dispatch<wl_keyboard::WlKeyboard, ()> for App {
+    fn event(app: &mut Self, _: &wl_keyboard::WlKeyboard, event: wl_keyboard::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+        use wl_keyboard::Event;
+        match event {
+            Event::Keymap { format: wayland_client::WEnum::Value(wl_keyboard::KeymapFormat::XkbV1), fd, size } => {
+                use std::os::unix::fs::FileExt;
+                if size > 8 * 1024 * 1024 { log::warn!("keyboard: oversized keymap"); return; }
+                let mut bytes = vec![0; size as usize];
+                match std::fs::File::from(fd).read_exact_at(&mut bytes, 0) {
+                    Ok(_) => if let Err(e) = app.keys.keymap(&bytes) { log::warn!("keyboard: {e:#}"); },
+                    Err(e) => log::warn!("keyboard: keymap read: {e}"),
+                }
+            }
+            Event::Enter { .. } => { app.host.refresh_input_fd(); app.keys.enter(); app.input.set_focus(true); }
+            Event::Leave { .. } => { for key in app.keys.leave() { app.input.send_key(key); } app.input.set_focus(false); }
+            Event::Modifiers { mods_depressed, mods_latched, mods_locked, group, .. } => {
+                app.keys.modifiers(mods_depressed, mods_latched, mods_locked, group);
+            }
+            Event::RepeatInfo { rate, delay } => app.keys.repeat_info(rate, delay),
+            Event::Key { key, state: wayland_client::WEnum::Value(state), .. } => {
+                if let Some(key) = app.keys.key(key, state == wl_keyboard::KeyState::Pressed) { app.input.send_key(key); }
+            }
+            _ => {}
         }
     }
 }
@@ -1107,6 +1170,18 @@ impl Dispatch<wl_pointer::WlPointer, ()> for App {
         use wl_pointer::Event;
         const BTN_LEFT: u32 = 0x110;
         match event {
+            Event::Axis { axis: wayland_client::WEnum::Value(axis), value, .. } => {
+                let i = usize::from(axis == wl_pointer::Axis::HorizontalScroll);
+                app.scroll_values[i] += value;
+            }
+            Event::AxisDiscrete { axis: wayland_client::WEnum::Value(axis), discrete } => {
+                let i = usize::from(axis == wl_pointer::Axis::HorizontalScroll);
+                *app.scroll_discrete[i].get_or_insert(0) += discrete;
+            }
+            Event::AxisSource { axis_source: wayland_client::WEnum::Value(source) } => {
+                app.scroll_finger = source == wl_pointer::AxisSource::Finger;
+            }
+            Event::Frame => app.send_scroll_frame(),
             Event::Enter { surface_x, surface_y, .. } => {
                 app.over_surface = true;
                 app.ptr_x = surface_x as f32 * app.host.scale as f32;

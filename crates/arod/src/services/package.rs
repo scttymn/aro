@@ -72,10 +72,13 @@ impl Service for PackageService {
             }
             "hasSystemFeature" => {
                 let feature: Option<String> = data.read()?;
-                let _version = data.read_i32()?;
-                log::info!("package: hasSystemFeature {feature:?} -> false");
+                let version = data.read_i32()?;
+                let supported = feature.as_deref()
+                    .and_then(|name| self.registry.system_feature_version(name))
+                    .is_some_and(|available| available >= version);
+                log::info!("package: hasSystemFeature {feature:?} -> {supported}");
                 ap::no_exception(reply)?;
-                ap::boolean(reply, false)?;
+                ap::boolean(reply, supported)?;
                 Ok(true)
             }
             "checkPermission" => {
@@ -142,7 +145,26 @@ impl Service for PackageService {
                 }
                 Ok(true)
             }
-            "getServiceInfo" | "getReceiverInfo" => {
+            "getServiceInfo" => {
+                let present = data.read_i32()?;
+                let (pkg, cls): (Option<String>, Option<String>) = if present != 0 { (data.read()?, data.read()?) } else { (None, None) };
+                let _flags = data.read_i64()?;
+                let _user = data.read_i32()?;
+                ap::no_exception(reply)?;
+                let info = pkg.as_deref().and_then(|p| self.registry.find(p)).and_then(|spec| cls.as_deref().and_then(|c| Registry::service_info(&spec, c)));
+                match info {
+                    Some(si) => {
+                        log::info!("package: getServiceInfo {pkg:?}/{cls:?} flags=0x{:x} process={}", si.flags, si.process_name);
+                        ap::typed(reply, |p| si.write(p))?
+                    }
+                    None => {
+                        log::warn!("package: getServiceInfo {pkg:?}/{cls:?}: unknown");
+                        ap::typed_none(reply)?
+                    }
+                }
+                Ok(true)
+            }
+            "getReceiverInfo" => {
                 ap::no_exception(reply)?;
                 ap::typed_none(reply)?;
                 Ok(true)

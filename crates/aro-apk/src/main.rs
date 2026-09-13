@@ -14,5 +14,15 @@ fn main() -> anyhow::Result<()> {
     for p in &m.providers {
         println!("provider: {} auth={} exported={}", p.name, p.authority, p.exported);
     }
+    for s in &m.services {
+        println!(
+            "service: {} process={} exported={} isolated={} external={}",
+            s.name,
+            s.process.as_deref().unwrap_or("-"),
+            s.exported,
+            s.isolated_process,
+            s.external_service
+        );
+    }
     Ok(())
 }

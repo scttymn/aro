@@ -24,8 +24,7 @@ fn cstring(p: &mut Parcel, s: &str) -> Result<()> {
 }
 
 /// android.view.InputDevice for the virtual keyboard (id -1), the device every
-/// Android system exposes. Its key character map is empty: the framework only
-/// needs the object to exist to prepare menus and translate shortcuts.
+/// Android system exposes. Its character map matches the host XKB translation.
 fn write_virtual_keyboard(p: &mut Parcel) -> Result<()> {
     // KeyCharacterMap (JNI: deviceId, bool has-map, then KeyCharacterMap::writeToParcel)
     p.write_i32(VIRTUAL_KEYBOARD)?;
@@ -33,7 +32,23 @@ fn write_virtual_keyboard(p: &mut Parcel) -> Result<()> {
     ap::string8(p, Some("/system/usr/keychars/Virtual.kcm"))?; // mLoadFileName (String8 in android17)
     p.write_i32(4)?; // KeyboardType::FULL
     p.write_i32(0)?; // mLayoutOverlayApplied
-    p.write_i32(0)?; // keys
+    let keys = crate::keyboard::characters();
+    p.write_i32(keys.len() as i32)?;
+    for (code, base, shifted) in keys {
+        p.write_i32(code)?;
+        p.write_i32(shifted as i32)?; // label
+        p.write_i32(if base.is_ascii_digit() { base as i32 } else { 0 })?;
+        // Behaviors are most-specific first. XKB resolves caps/layout to the
+        // corresponding virtual key + shift before the event reaches Android.
+        for (meta, character) in [(1, shifted), (0, base)] {
+            p.write_i32(1)?;
+            p.write_i32(meta)?;
+            p.write_i32(character as i32)?;
+            p.write_i32(0)?; // fallback
+            p.write_i32(0)?; // replacement
+        }
+        p.write_i32(0)?; // end behaviors
+    }
     p.write_i32(0)?; // key remapping
     p.write_i32(0)?; // keys by scan code
     p.write_i32(0)?; // keys by usage code

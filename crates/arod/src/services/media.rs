@@ -65,6 +65,7 @@ pub struct MediaService {
     pub visual: std::sync::RwLock<Vec<VisualItem>>,
     pub next_id: std::sync::atomic::AtomicI64,
     custom_path: PathBuf,
+    documents: std::sync::RwLock<std::collections::HashMap<i64, PathBuf>>,
 }
 
 impl MediaService {
@@ -174,6 +175,7 @@ impl MediaService {
         }
 
         Self {
+            documents: Default::default(),
             items: std::sync::RwLock::new(items),
             visual: std::sync::RwLock::new(visual),
             next_id: std::sync::atomic::AtomicI64::new(next_id),
@@ -190,6 +192,23 @@ impl MediaService {
         if let Ok(json) = serde_json::to_string_pretty(&custom) {
             let _ = std::fs::write(&self.custom_path, json);
         }
+    }
+
+    pub fn select_document(&self, path: PathBuf) -> std::io::Result<String> {
+        let path = path.canonicalize()?;
+        if !path.is_file() { return Err(std::io::Error::other("selection is not a regular file")); }
+        let id = self.next_id.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.documents.write().unwrap().insert(id, path);
+        Ok(format!("content://media/aro-files/{id}"))
+    }
+
+    fn document_mime(&self, uri: &str) -> Option<&'static str> {
+        self.selected_document(uri).map(|path| super::activity::infer_mime_type(&path.to_string_lossy()).unwrap_or("application/octet-stream"))
+    }
+
+    fn selected_document(&self, uri: &str) -> Option<PathBuf> {
+        let id: i64 = uri.strip_prefix("content://media/aro-files/")?.parse().ok()?;
+        self.documents.read().unwrap().get(&id).cloned()
     }
 
     pub fn add_custom_file(&self, path: PathBuf) -> AudioItem {
@@ -912,6 +931,20 @@ impl Service for MediaProvider {
                 log::info!("media: QUERY uri={uri:?} proj={projection:?} bundle_len={bundle_len}");
 
                 let uri_str = uri.as_deref().unwrap_or("");
+                if uri_str.starts_with("content://media/aro-files/") {
+                    let cols = if projection.is_empty() { vec!["_display_name".into(), "_size".into()] } else { projection };
+                    let mut window = CursorWindowBuilder::new("aro_document", cols.clone());
+                    let mut count = 0;
+                    if let Some(path) = self.service.selected_document(uri_str) {
+                        let row = cols.iter().map(|col| match col.as_str() {
+                            "_display_name" => CellValue::String(path.file_name().unwrap().to_string_lossy().into_owned()),
+                            "_size" => CellValue::Integer(path.metadata().map(|m| m.len() as i64).unwrap_or(0)),
+                            _ => CellValue::Null,
+                        }).collect();
+                        window.add_row(row); count = 1;
+                    }
+                    return write_query_reply(reply, &self.bulk_cursor, &cols, count, window);
+                }
                 let kind = classify_uri(uri_str);
                 match kind {
                     UriKind::Images { id } | UriKind::Videos { id } | UriKind::Files { id } => {
@@ -947,7 +980,14 @@ impl Service for MediaProvider {
                     UriKind::Thumbnails => None,
                 };
 
-                let open = id.and_then(|id| self.lookup_open(kind, id));
+                if uri_str.starts_with("content://media/aro-files/") && name != "OPEN_TYPED_ASSET_FILE" && mode.as_deref() != Some("r") {
+                    reply.write_i32(-5)?;
+                    ap::string16(reply, Some("Selected document has a read-only grant"))?;
+                    return Ok(true);
+                }
+                let open = if uri_str.starts_with("content://media/aro-files/") {
+                    self.service.selected_document(uri_str).map(|p| (p, "application/octet-stream".to_string()))
+                } else { id.and_then(|id| self.lookup_open(kind, id)) };
                 let Some((path, _mime)) = open else {
                     log::warn!("media: {name} item not found for uri={uri:?}");
                     reply.write_i32(-5)?; // FileNotFoundException
@@ -991,7 +1031,7 @@ impl Service for MediaProvider {
                     _ => None,
                 };
                 ap::no_exception(reply)?;
-                ap::string16(reply, Some(mime_for_kind(kind, visual.as_ref())))?;
+                ap::string16(reply, Some(self.service.document_mime(uri_str).unwrap_or_else(|| mime_for_kind(kind, visual.as_ref()))))?;
                 Ok(true)
             }
             "CANONICALIZE" | "UNCANONICALIZE" => {
@@ -1010,7 +1050,7 @@ impl Service for MediaProvider {
                     }
                     _ => None,
                 };
-                let mime = mime_for_kind(kind, visual.as_ref());
+                let mime = self.service.document_mime(uri_str).unwrap_or_else(|| mime_for_kind(kind, visual.as_ref()));
                 let callback_binder: Option<SIBinder> = data.read().ok();
                 if let Some(binder) = callback_binder {
                     if let Some(proxy) = binder.as_proxy() {
@@ -1324,5 +1364,25 @@ mod tests {
         );
         assert!(items.iter().all(|i| i.container_path.starts_with("/storage/emulated/0/")));
         assert!(items.iter().all(|i| i.bucket_id != 0 || i.bucket_display_name.is_empty()));
+    }
+}
+
+#[cfg(test)]
+mod selected_document_tests {
+    use super::*;
+    #[test]
+    fn only_selected_files_resolve_and_mime_is_not_assumed_audio() {
+        let dir = std::env::temp_dir().join(format!("aro-doc-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("selected text.txt");
+        std::fs::write(&file,b"ARO").unwrap();
+        let service = MediaService { items: Default::default(), visual: Default::default(), next_id: std::sync::atomic::AtomicI64::new(1), custom_path: dir.join("unused.json"), documents: Default::default() };
+        let uri = service.select_document(file.clone()).unwrap();
+        assert_eq!(service.selected_document(&uri),Some(file));
+        assert_eq!(service.document_mime(&uri),Some("text/plain"));
+        assert!(service.selected_document("content://media/aro-files/2").is_none());
+        assert!(service.selected_document("content://media/aro-files/../1").is_none());
+        assert!(service.select_document(dir.clone()).is_err());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

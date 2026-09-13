@@ -35,6 +35,11 @@ impl Service for MediaPlayerService {
                 reply.write(&Some(binder))?;
                 Ok(true)
             }
+            "CREATE_MEDIA_RECORDER" => {
+                log::info!("media.player: create recorder");
+                reply.write(&Some(services::binder_of(super::media_recorder::MediaRecorder::default())))?;
+                Ok(true)
+            }
             "CREATE_METADATA_RETRIEVER" => {
                 log::info!("media.player: CREATE_METADATA_RETRIEVER");
                 let retriever = MetadataRetrieverInstance;

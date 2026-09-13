@@ -1,0 +1,119 @@
+#!/usr/bin/env python3
+"""ARO desktop command. Runtime operations are delegated to arod."""
+import configparser
+import json
+import os
+from pathlib import Path
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+import time
+
+ROOT = Path(__file__).resolve().parent.parent
+DATA = Path(os.environ.get('XDG_DATA_HOME', Path.home() / '.local/share'))
+MENU = Path(os.environ.get('XDG_CONFIG_HOME', Path.home() / '.config')) / 'omarchy/extensions/omarchy-menu.jsonc'
+
+def daemon():
+    candidate = Path(os.environ.get('ARO_DAEMON', ROOT / 'target/debug/arod'))
+    if not candidate.is_file():
+        raise RuntimeError('Build the runtime first: cargo build -p arod -p aro-exec')
+    return str(candidate)
+
+def entries():
+    result = []
+    for path in sorted((DATA / 'applications').glob('aro-*.desktop')):
+        config = configparser.ConfigParser(interpolation=None)
+        config.read(path)
+        if 'Desktop Entry' not in config:
+            continue
+        entry = config['Desktop Entry']
+        if entry.get('NoDisplay', 'false') == 'true':
+            continue
+        result.append((path, entry))
+    return result
+
+def apps():
+    rows = entries()
+    if not rows:
+        raise RuntimeError('No Android launchers yet. Use aro install app.apk.')
+    args = ['zenity', '--list', '--title=ARO — Android apps', '--column=Launcher', '--column=App', '--hide-column=1', '--print-column=1', '--width=600', '--height=500']
+    for path, entry in rows:
+        args += [path.name, entry.get('Name', path.stem)]
+    selected = subprocess.run(args, capture_output=True, text=True)
+    if selected.returncode:
+        return
+    name = selected.stdout.rstrip('\n')
+    path = next((path for path, _ in rows if path.name == name), None)
+    if path:
+        logs = Path(os.environ.get('XDG_CACHE_HOME', Path.home() / '.cache')) / 'aro'
+        logs.mkdir(parents=True, exist_ok=True)
+        with (logs / 'launcher.log').open('a') as log:
+            subprocess.run(['gio', 'launch', str(path)], check=True, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+
+def menu_install(remove=False):
+    MENU.parent.mkdir(parents=True, exist_ok=True)
+    original = MENU.read_text() if MENU.exists() else '{\n}\n'
+    pattern = re.compile(r'^[ \t]*// >>> aro desktop\n.*?^[ \t]*// <<< aro desktop\n', re.S | re.M)
+    clean = pattern.sub('', original)
+    if remove:
+        updated = clean
+    else:
+        cli = shlex.quote(str(Path(__file__).resolve()))
+        rows = {
+            'aro': {'icon': '󰀲', 'label': 'Android (ARO)'},
+            'aro.apps': {'icon': '󰀻', 'label': 'Android apps', 'action': f'{cli} apps'},
+            'aro.install': {'icon': '󰏓', 'label': 'Install APK…', 'action': f'{cli} pick'},
+            'aro.open': {'icon': '󰌹', 'label': 'Open link or file in Android…', 'action': f'{cli} open-dialog'},
+            'aro.sync': {'icon': '󰑓', 'label': 'Refresh Android launchers', 'action': f'{cli} sync'},
+        }
+        block = '  // >>> aro desktop\n' + ''.join('  ' + json.dumps(k) + ': ' + json.dumps(v, ensure_ascii=False) + ',\n' for k, v in rows.items()) + '  // <<< aro desktop\n'
+        if pattern.search(original):
+            updated = pattern.sub(lambda _: block, original, count=1)
+        else:
+            at = clean.index('{') + 1
+            updated = clean[:at] + '\n' + block + clean[at:]
+    if updated != original:
+        if MENU.exists(): shutil.copy2(MENU, MENU.with_name(MENU.name + f'.aro-backup-{time.time_ns()}'))
+        temporary = MENU.with_suffix('.aro-tmp')
+        temporary.write_text(updated)
+        os.replace(temporary, MENU)
+    print(('Removed' if remove else 'Installed') + f' ARO menu: {MENU}')
+
+def sync():
+    paths = set((DATA / 'aro/apps').glob('*/base.apk'))
+    for _, entry in entries():
+        if entry.get('X-ARO-Apk'):
+            paths.add(Path(entry['X-ARO-Apk']))
+        else:
+            # Original ARO entries used simple Exec paths; migrate those too.
+            args = shlex.split(entry.get('Exec', ''))
+            if len(args) >= 3 and args[1] == 'app': paths.add(Path(args[2]))
+    for path in sorted(paths):
+        if path.is_file(): subprocess.run([daemon(), 'desktop-entry', str(path)], check=True)
+
+def main():
+    command = sys.argv[1] if len(sys.argv) > 1 else 'apps'
+    if command in ('--help', '-h', 'help'):
+        subprocess.run([daemon(), '--help'], check=True)
+        print('Desktop commands: apps, sync, open-dialog, menu-install, menu-remove, location [status|install]')
+    elif command == 'location':
+        if len(sys.argv) > 3:
+            raise ValueError('Usage: aro location [status|install]')
+        subprocess.run(['bash', str(ROOT / 'tools/setup-location.sh'), *sys.argv[2:]], check=True)
+    elif command == 'apps': apps()
+    elif command == 'menu-install': menu_install()
+    elif command == 'menu-remove': menu_install(True)
+    elif command == 'sync': sync()
+    elif command == 'open-dialog':
+        picked = subprocess.run(['zenity', '--entry', '--title=Open in Android', '--text=URL or file path'], capture_output=True, text=True)
+        if picked.returncode == 0 and picked.stdout.strip(): subprocess.run([daemon(), 'open', picked.stdout.rstrip('\n')], check=True)
+    else:
+        os.execv(daemon(), [daemon(), *sys.argv[1:]])
+
+if __name__ == '__main__':
+    try: main()
+    except (OSError, RuntimeError, ValueError, subprocess.CalledProcessError) as error:
+        print(f'aro: {error}', file=sys.stderr)
+        sys.exit(1)

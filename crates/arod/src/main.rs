@@ -15,11 +15,14 @@ use anyhow::{bail, Context, Result};
 mod bundle;
 mod dnsproxy;
 mod hostnet;
+mod portal;
+mod location_setup;
 mod shade;
 mod compositor;
 #[allow(dead_code)]
 mod notify;
 mod input_channel;
+mod keyboard;
 use aro_exec::{layout::Layout, logd, ns::Session, prepare};
 use clap::{Parser, Subcommand};
 use rsbinder::hub::android_16::android::os::IServiceManager::BnServiceManager;
@@ -35,6 +38,9 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
+    /// Internal host-side first-use location helper (private stdio protocol).
+    #[command(hide = true)]
+    LocationHost,
     /// Start a session, then run the M1 bootstrap against an APK inside it
     Run {
         apk: PathBuf,
@@ -58,6 +64,10 @@ enum Cmd {
         #[arg(long)]
         url: Option<String>,
     },
+    /// Copy an APK into ARO storage and register its desktop launcher
+    Install { apk: PathBuf },
+    /// Pick an APK with the desktop portal and install it
+    Pick,
     /// Inbound intent bridge: open a URI or host file in the matching ARO app
     Open {
         uri: String,
@@ -67,6 +77,7 @@ enum Cmd {
 fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).format_timestamp_millis().init();
     let cli = Cli::parse();
+    if let Cmd::LocationHost = &cli.cmd { return location_setup::serve(); }
     // A desktop-entry request only writes host files; it needs no session or image.
     if let Cmd::DesktopEntry { apk } = &cli.cmd {
         return write_desktop_entry(apk);
@@ -74,11 +85,22 @@ fn main() -> Result<()> {
     if let Cmd::Open { uri } = &cli.cmd {
         return open_uri(uri);
     }
+    if let Cmd::Install { apk } = &cli.cmd { return install_apk(apk); }
+    if let Cmd::Pick = &cli.cmd {
+        if let Some(apk) = portal::open_file(nix::unistd::getuid().as_raw(), "ARO: Install Android app", Some("application/vnd.android.package-archive"))? { install_apk(&apk)?; }
+        return Ok(());
+    }
     let layout = Layout::default();
     if !layout.system.join("system/bin/app_process64").exists() {
         bail!("no unpacked system image at {} (run: aro-image unpack)", layout.system.display());
     }
 
+    // Keep permission UI and package installation on the real host. Starting a
+    // child does not create supervisor threads before entering the namespaces.
+    let location_setup = match location_setup::HostSetup::spawn() {
+        Ok(helper) => Some(std::sync::Arc::new(helper)),
+        Err(e) => { log::warn!("location setup unavailable: {e:#}"); None }
+    };
     // 1. Session namespaces (single-threaded here).
     let session = session::enter(&layout)?;
     prepare::prepare(&layout)?;
@@ -143,6 +165,7 @@ fn main() -> Result<()> {
     });
     let activity = std::sync::Arc::new(services::activity::ActivityService {
         registry: registry.clone(),
+        host_uid: session.host_uid,
         compat: compat.clone(),
         settings_provider,
         media_provider,
@@ -150,12 +173,14 @@ fn main() -> Result<()> {
         calendar_provider,
         calendar_service: calendar_service.clone(),
         pending: std::sync::Mutex::new(None),
+        service_processes: services::service_processes::ServiceProcesses::default(),
         attached: std::sync::Mutex::new(None),
         client_controller: std::sync::Mutex::new(None),
         launch_url: std::sync::Mutex::new(None),
         pending_intents: pending_intents.clone(),
         activity_stack: std::sync::Mutex::new(Vec::new()),
         running_services: std::sync::Mutex::new(std::collections::HashMap::new()),
+        bindings: std::sync::Mutex::new(Vec::new()),
         next_service_start_id: std::sync::atomic::AtomicI32::new(1),
     });
     let controller = services::binder_of(services::activity_task::ActivityClientController { activity: activity.clone() });
@@ -221,8 +246,9 @@ fn main() -> Result<()> {
     services::publish(&hub_impl, "contextual_mode", services::modes::ModesService);
     // Network: mirror the host's connection (NetworkManager on the system bus).
     if let Err(e) = dnsproxy::serve(&session.sockets) { log::warn!("dnsproxyd: {e}"); }
+    services::publish(&hub_impl, "location", services::location::LocationService { host_uid: session.host_uid, setup: location_setup, activity: activity.clone() });
     let hostnet = hostnet::probe(session.host_uid);
-    services::publish(&hub_impl, "connectivity", services::network::NetworkService { net: hostnet.clone() });
+    services::publish(&hub_impl, "connectivity", services::network::NetworkService { net: hostnet::monitor(session.host_uid, hostnet.clone()) });
     // The allocator is a VINTF-stable HAL binder; the mapper half is a bionic
     // library bound into the app at /vendor/lib64/hw/mapper.aro.so.
     hub_impl.register("android.hardware.graphics.allocator.IAllocator/default", services::vintf_binder_of(services::allocator::AllocatorService { gralloc: gralloc.clone() }));
@@ -235,6 +261,7 @@ fn main() -> Result<()> {
     services::publish(&hub_impl, "uimode", services::uimode::UiModeService);
     services::publish(&hub_impl, "power", services::power::PowerService);
     services::publish(&hub_impl, "thermalservice", services::thermal::ThermalService);
+    services::publish(&hub_impl, "clipboard", services::clipboard::ClipboardService::default());
     services::publish(&hub_impl, "content", services::content::ContentService);
     services::publish(&hub_impl, "mount", services::storage::StorageService);
     services::publish(&hub_impl, "sensorservice", services::sensor::SensorService);
@@ -247,6 +274,7 @@ fn main() -> Result<()> {
     services::publish(&hub_impl, "display", services::display::DisplayService { name: hd.name.clone(), width: hd.width, height: hd.height, dpi: hd.dpi(), callbacks: std::sync::Mutex::new(Vec::new()) });
     services::publish(&hub_impl, "activity", services::activity::ActivityRef(activity.clone()));
     services::publish(&hub_impl, "uri_grants", services::uri_grants::UriGrantsService);
+    services::publish(&hub_impl, "webviewupdate", services::webview_update::WebViewUpdateService { registry: registry.clone() });
 
     // Properties are cheap to regenerate and ARO's extra ones evolve with the runtime.
     let mut extra_props: Vec<(String, String)> = Vec::new();
@@ -268,6 +296,10 @@ fn main() -> Result<()> {
     if let Some(ref sd) = sdcard {
         cmd.env("ARO_SDCARD", sd);
     }
+    *activity.service_processes.launcher.lock().unwrap() = Some(services::service_processes::Launcher {
+        exe: exe.clone(),
+        env: cmd.get_envs().filter_map(|(k, v)| v.map(|v| (k.to_os_string(), v.to_os_string()))).collect(),
+    });
     match cli.cmd {
         Cmd::Run { apk, class, method } => {
             cmd.arg("run").arg(apk).arg(class);
@@ -278,7 +310,7 @@ fn main() -> Result<()> {
         Cmd::Shell => {
             cmd.arg("shell");
         }
-        Cmd::DesktopEntry { .. } | Cmd::Open { .. } => unreachable!("handled before session setup"),
+        Cmd::LocationHost | Cmd::DesktopEntry { .. } | Cmd::Open { .. } | Cmd::Install { .. } | Cmd::Pick => unreachable!("handled before session setup"),
         Cmd::App { apk, activity: main_activity, url } => {
             let apk = apk.canonicalize()?;
             let name = apk.file_name().unwrap().to_string_lossy().into_owned();
@@ -308,16 +340,15 @@ fn main() -> Result<()> {
                 spec.requested_activity = Some(a);
             }
             if let Some(u) = url {
-                let u = if let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) {
-                    if let Some(rest) = u.strip_prefix(&format!("file://{}", home.display())) {
-                        format!("file:///sdcard{rest}")
-                    } else {
-                        u
-                    }
-                } else {
-                    u
-                };
+                let u = android_file_uri(&u, sdcard.as_deref().map(std::path::Path::new));
                 *activity.launch_url.lock().unwrap() = Some(u);
+            }
+            let webview_apk = layout.system.join("system/product/app/webview/webview.apk");
+            if webview_apk.is_file() {
+                if let Ok(manifest) = aro_apk::inspect(&webview_apk) {
+                    let webview_spec = services::registry::AppSpec::from_manifest(&manifest, "/system/product/app/webview/webview.apk".into(), 10002);
+                    registry.apps.lock().unwrap().push(webview_spec);
+                }
             }
             registry.apps.lock().unwrap().push(spec.clone());
             *activity.pending.lock().unwrap() = Some(spec);
@@ -407,6 +438,17 @@ fn write_desktop_entry(apk: &std::path::Path) -> Result<()> {
     let arod = std::env::current_exe()?;
     let dir = dirs_applications()?;
     std::fs::create_dir_all(&dir)?;
+    if manifest.main_activity().is_none() {
+        let old = dir.join(format!("aro-{}.desktop", manifest.package));
+        if old.is_file() {
+            let text = std::fs::read_to_string(&old)?;
+            if !text.lines().any(|line| line == "NoDisplay=true") {
+                std::fs::write(&old, format!("{text}\nNoDisplay=true\n"))?;
+            }
+        }
+        println!("Installed {} (no launcher activity)", manifest.package);
+        return Ok(());
+    }
 
     // --- Extract icon ---
     let icon_name = format!("aro-{}", manifest.package);
@@ -453,10 +495,12 @@ fn write_desktop_entry(apk: &std::path::Path) -> Result<()> {
          Icon={icon}\n\
          Terminal=false\n\
          Categories=Utility;\n\
-         StartupWMClass={pkg}\n",
+         StartupWMClass={pkg}\n\
+         X-ARO-Apk={apk_path}\n",
         name = human_name,
-        arod = arod.display(),
-        apk = apk.display(),
+        apk_path = apk.to_string_lossy().replace('\\', "\\\\").replace('\n', "\\n"),
+        arod = desktop_arg(&arod.to_string_lossy()),
+        apk = desktop_arg(&apk.to_string_lossy()),
         icon = icon_ref,
         pkg = manifest.package,
     );
@@ -500,8 +544,8 @@ fn write_desktop_entry(apk: &std::path::Path) -> Result<()> {
              NoDisplay=true\n\
              MimeType={mimetypes}\n",
             pkg = manifest.package,
-            arod = arod.display(),
-            apk = apk.display(),
+            arod = desktop_arg(&arod.to_string_lossy()),
+            apk = desktop_arg(&apk.to_string_lossy()),
         );
         let handler_file = dir.join(format!("aro-{}-handler.desktop", manifest.package));
         std::fs::write(&handler_file, &handler_entry)?;
@@ -533,11 +577,11 @@ fn dirs_icons() -> Result<std::path::PathBuf> {
 }
 
 fn open_uri(uri_or_path: &str) -> Result<()> {
-    let uri = if !uri_or_path.contains("://") {
-        let abs = std::path::Path::new(uri_or_path).canonicalize().context("resolving path")?;
-        format!("file://{}", abs.display())
-    } else {
+    let uri = if url::Url::parse(uri_or_path).is_ok() {
         uri_or_path.to_string()
+    } else {
+        let abs = std::path::Path::new(uri_or_path).canonicalize().context("resolving path")?;
+        url::Url::from_file_path(abs).map_err(|_| anyhow::anyhow!("invalid file path"))?.to_string()
     };
 
     let layout = Layout::default();
@@ -563,6 +607,12 @@ fn open_uri(uri_or_path: &str) -> Result<()> {
         }
     }
 
+    let installed = layout.system.parent().unwrap().join("apps");
+    if let Ok(entries) = std::fs::read_dir(installed) {
+        for entry in entries.flatten() { let apk = entry.path().join("base.apk"); if apk.is_file() { candidate_apks.push(apk); } }
+    }
+    candidate_apks.sort();
+    candidate_apks.dedup();
     for apk in &candidate_apks {
         if let Ok(manifest) = aro_apk::inspect(apk) {
             let spec = services::registry::AppSpec::from_manifest(&manifest, "/dummy".into(), 10001);
@@ -581,4 +631,50 @@ fn open_uri(uri_or_path: &str) -> Result<()> {
     }
 
     bail!("no installed ARO app handles {uri}");
+}
+
+fn desktop_arg(value: &str) -> String {
+    let exec = value.replace('%', "%%").replace('\\', "\\\\").replace('"', "\\\"").replace('`', "\\`").replace('$', "\\$");
+    format!("\"{}\"", exec.replace('\\', "\\\\").replace('\n', "\\n").replace('\r', "\\r"))
+}
+
+fn android_file_uri(uri: &str, sdcard: Option<&std::path::Path>) -> String {
+    let mapped = (|| {
+        let host = url::Url::parse(uri).ok()?.to_file_path().ok()?;
+        let relative = host.strip_prefix(sdcard?).ok()?;
+        url::Url::from_file_path(std::path::Path::new("/sdcard").join(relative)).ok()
+    })();
+    mapped.map(|u| u.to_string()).unwrap_or_else(|| uri.to_string())
+}
+
+fn install_apk(apk: &std::path::Path) -> Result<()> {
+    let source = apk.canonicalize()?;
+    let manifest = aro_apk::inspect(&source)?;
+    anyhow::ensure!(manifest.package.split('.').all(|part| !part.is_empty() && part.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')), "invalid package name");
+    let dir = Layout::default().system.parent().unwrap().join("apps").join(&manifest.package);
+    std::fs::create_dir_all(&dir)?;
+    let dest = dir.join("base.apk");
+    if source != dest {
+        let temp = dir.join("base.apk.new");
+        std::fs::copy(&source, &temp)?;
+        std::fs::rename(temp, &dest)?;
+    }
+    write_desktop_entry(&dest)
+}
+
+#[cfg(test)]
+mod desktop_tests {
+    use super::*;
+    #[test]
+    fn file_mapping_obeys_directory_boundaries_and_uri_encoding() {
+        let home = Some(std::path::Path::new("/home/test"));
+        assert_eq!(android_file_uri("file:///home/test/a%20b.ogg", home), "file:///sdcard/a%20b.ogg");
+        assert_eq!(android_file_uri("file:///home/test-other/a.ogg", home), "file:///home/test-other/a.ogg");
+        assert_eq!(android_file_uri("https://example.com/", home), "https://example.com/");
+    }
+    #[test]
+    fn desktop_exec_escapes_field_codes_and_metacharacters() {
+        assert_eq!(desktop_arg("/tmp/a b%f"), "\"/tmp/a b%%f\"");
+        assert_eq!(desktop_arg("$`\""), "\"\\\\$\\\\`\\\\\"\"");
+    }
 }

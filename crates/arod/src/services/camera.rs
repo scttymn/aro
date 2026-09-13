@@ -12,6 +12,13 @@ impl Service for CameraService {
 
     fn handle(&self, name: &str, _code: TransactionCode, data: &mut Parcel, reply: &mut Parcel) -> Result<bool> {
         match name {
+            "getCameraVendorTagDescriptor" | "getCameraVendorTagCache" => {
+                ap::no_exception(reply)?;
+                // Native VendorTagDescriptor/Cache: non-null parcelable, zero tags/vendors.
+                reply.write_i32(1)?;
+                reply.write_i32(0)?;
+                Ok(true)
+            }
             "getNumberOfCameras" => {
                 ap::no_exception(reply)?;
                 reply.write_i32(0)?;

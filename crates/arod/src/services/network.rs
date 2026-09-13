@@ -7,7 +7,7 @@ use crate::hostnet::HostNet;
 use rsbinder::{Parcel, Result, TransactionCode};
 
 pub struct NetworkService {
-    pub net: HostNet,
+    pub net: std::sync::Arc<std::sync::RwLock<HostNet>>,
 }
 
 const NET_ID: i32 = 100;
@@ -24,10 +24,23 @@ const CAP_NOT_CONGESTED: i64 = 20;
 const CAP_NOT_SUSPENDED: i64 = 21;
 const CAP_NOT_VCN_MANAGED: i64 = 28;
 
-impl NetworkService {
+struct NetworkSnapshot {
+    net: HostNet,
+}
+
+impl NetworkSnapshot {
     fn caps_mask(&self) -> i64 {
         let mut m = 0i64;
-        for b in [CAP_INTERNET, CAP_NOT_RESTRICTED, CAP_TRUSTED, CAP_NOT_VPN, CAP_NOT_ROAMING, CAP_NOT_CONGESTED, CAP_NOT_SUSPENDED, CAP_NOT_VCN_MANAGED] {
+        for b in [
+            CAP_INTERNET,
+            CAP_NOT_RESTRICTED,
+            CAP_TRUSTED,
+            CAP_NOT_VPN,
+            CAP_NOT_ROAMING,
+            CAP_NOT_CONGESTED,
+            CAP_NOT_SUSPENDED,
+            CAP_NOT_VCN_MANAGED,
+        ] {
             m |= 1 << b;
         }
         if self.net.validated {
@@ -39,11 +52,10 @@ impl NetworkService {
         m
     }
 
-    /// android.net.Network: netId, then (Android B+) two booleans.
+    /// android.net.Network: netId, then one private-DNS-bypass boolean.
     fn write_network(p: &mut Parcel) -> Result<()> {
         p.write_i32(NET_ID)?;
         ap::boolean(p, false)?; // mPrivateDnsBypass
-        ap::boolean(p, false)?; // (reserved flag, B+)
         Ok(())
     }
 
@@ -80,7 +92,11 @@ impl NetworkService {
             crate::hostnet::TRANSPORT_CELLULAR => (0, "MOBILE"),
             _ => (9, "ETHERNET"),
         };
-        let state = if self.net.online { "CONNECTED" } else { "DISCONNECTED" };
+        let state = if self.net.online {
+            "CONNECTED"
+        } else {
+            "DISCONNECTED"
+        };
         p.write_i32(ty)?; // mNetworkType
         p.write_i32(0)?; // mSubtype
         ap::string16(p, Some(name))?; // mTypeName
@@ -100,12 +116,21 @@ impl Service for NetworkService {
     const DESCRIPTOR: &'static str = "android.net.IConnectivityManager";
     const TABLE: &'static [(u32, &'static str)] = super::network_codes::ICONNECTIVITYMANAGER;
 
-    fn handle(&self, name: &str, _code: TransactionCode, _data: &mut Parcel, reply: &mut Parcel) -> Result<bool> {
+    fn handle(
+        &self,
+        name: &str,
+        _code: TransactionCode,
+        _data: &mut Parcel,
+        reply: &mut Parcel,
+    ) -> Result<bool> {
+        let snapshot = NetworkSnapshot {
+            net: self.net.read().unwrap().clone(),
+        };
         match name {
             "getActiveNetwork" | "getActiveNetworkForUid" => {
                 ap::no_exception(reply)?;
-                if self.net.online {
-                    ap::typed(reply, |p| Self::write_network(p))?;
+                if snapshot.net.online {
+                    ap::typed(reply, |p| NetworkSnapshot::write_network(p))?;
                 } else {
                     ap::typed_none(reply)?;
                 }
@@ -113,17 +138,20 @@ impl Service for NetworkService {
             }
             "getNetworkCapabilities" => {
                 ap::no_exception(reply)?;
-                if self.net.online {
-                    ap::typed(reply, |p| self.write_capabilities(p))?;
+                if snapshot.net.online {
+                    ap::typed(reply, |p| snapshot.write_capabilities(p))?;
                 } else {
                     ap::typed_none(reply)?;
                 }
                 Ok(true)
             }
-            "getActiveNetworkInfo" | "getActiveNetworkInfoForUid" | "getNetworkInfo" | "getNetworkInfoForUid" => {
+            "getActiveNetworkInfo"
+            | "getActiveNetworkInfoForUid"
+            | "getNetworkInfo"
+            | "getNetworkInfoForUid" => {
                 ap::no_exception(reply)?;
-                if self.net.online {
-                    ap::typed(reply, |p| self.write_network_info(p))?;
+                if snapshot.net.online {
+                    ap::typed(reply, |p| snapshot.write_network_info(p))?;
                 } else {
                     ap::typed_none(reply)?;
                 }
@@ -132,9 +160,9 @@ impl Service for NetworkService {
             "getAllNetworks" => {
                 // Network[]
                 ap::no_exception(reply)?;
-                if self.net.online {
+                if snapshot.net.online {
                     reply.write_i32(1)?;
-                    Self::write_network(reply)?;
+                    ap::typed(reply, NetworkSnapshot::write_network)?;
                 } else {
                     reply.write_i32(0)?;
                 }
@@ -148,17 +176,20 @@ impl Service for NetworkService {
             }
             "isActiveNetworkMetered" => {
                 ap::no_exception(reply)?;
-                ap::boolean(reply, self.net.metered)?;
+                ap::boolean(reply, snapshot.net.metered)?;
                 Ok(true)
             }
             "isDefaultNetworkActive" => {
                 ap::no_exception(reply)?;
-                ap::boolean(reply, self.net.online)?;
+                ap::boolean(reply, snapshot.net.online)?;
                 Ok(true)
             }
             _ => {
                 ap::no_exception(reply)?;
-                if name.starts_with("is") || name.starts_with("are") || name.starts_with("request") && name != "requestNetwork" {
+                if name.starts_with("is")
+                    || name.starts_with("are")
+                    || name.starts_with("request") && name != "requestNetwork"
+                {
                     ap::boolean(reply, false)?;
                 } else if name.starts_with("get") {
                     ap::typed_none(reply)?;
@@ -166,5 +197,48 @@ impl Service for NetworkService {
                 Ok(true)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn network_arrays_have_presence_and_one_flag_per_element() {
+        let state = std::sync::Arc::new(std::sync::RwLock::new(HostNet {
+            online: true,
+            ..Default::default()
+        }));
+        let service = NetworkService { net: state.clone() };
+        let mut reply = Parcel::new();
+        service
+            .handle("getAllNetworks", 9, &mut Parcel::new(), &mut reply)
+            .unwrap();
+        reply.set_data_position(0);
+        assert_eq!(reply.read_i32().unwrap(), 0); // exception
+        assert_eq!(reply.read_i32().unwrap(), 1); // count
+        assert_eq!(reply.read_i32().unwrap(), 1); // typed object present
+        assert_eq!(reply.read_i32().unwrap(), NET_ID);
+        assert_eq!(reply.read_i32().unwrap(), 0); // privateDnsBypass
+        assert_eq!(reply.data_position(), reply.data_size());
+        state.write().unwrap().online = false;
+        let mut reply = Parcel::new();
+        service
+            .handle("getActiveNetwork", 1, &mut Parcel::new(), &mut reply)
+            .unwrap();
+        reply.set_data_position(0);
+        assert_eq!(reply.read_i32().unwrap(), 0);
+        assert_eq!(reply.read_i32().unwrap(), 0); // no active network after host update
+    }
+    #[test]
+    fn capabilities_follow_validation_and_metering() {
+        let mut net = NetworkSnapshot {
+            net: HostNet::default(),
+        };
+        assert_eq!(net.caps_mask() & (1 << CAP_VALIDATED), 0);
+        net.net.validated = true;
+        net.net.metered = true;
+        assert_ne!(net.caps_mask() & (1 << CAP_VALIDATED), 0);
+        assert_eq!(net.caps_mask() & (1 << CAP_NOT_METERED), 0);
     }
 }

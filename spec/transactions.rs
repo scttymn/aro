@@ -985,6 +985,19 @@ pub static IUSAGESTATSMANAGER: &[(u32, &str)] = &[
 
 /// android.content.IClipboard$Stub (descriptor android.content.IClipboard)
 pub static ICLIPBOARD: &[(u32, &str)] = &[
+    (1, "setPrimaryClip"),
+    (2, "setPrimaryClipAsPackage"),
+    (3, "clearPrimaryClip"),
+    (4, "getPrimaryClip"),
+    (5, "getPrimaryClipDescription"),
+    (6, "hasPrimaryClip"),
+    (7, "addPrimaryClipChangedListener"),
+    (8, "removePrimaryClipChangedListener"),
+    (9, "hasClipboardText"),
+    (10, "getPrimaryClipSource"),
+    (11, "areClipboardAccessNotificationsEnabledForUser"),
+    (12, "setClipboardAccessNotificationsEnabledForUser"),
+    (13, "notifyUserAuthorizedClipAccess"),
 ];
 
 /// android.content.IContentService$Stub (descriptor android.content.IContentService)
@@ -1331,6 +1344,17 @@ pub static IPACKAGEMANAGERNATIVE: &[(u32, &str)] = &[
 
 /// android.hardware.ICameraService$Stub (descriptor android.hardware.ICameraService)
 pub static ICAMERASERVICE: &[(u32, &str)] = &[
+    (1, "getNumberOfCameras"),
+    (5, "addListener"),
+    (6, "getConcurrentCameraIds"),
+    (7, "isConcurrentSessionConfigurationSupported"),
+    (10, "removeListener"),
+    (12, "getCameraVendorTagDescriptor"),
+    (13, "getCameraVendorTagCache"),
+    (15, "isHiddenPhysicalCamera"),
+    (20, "notifySystemEvent"),
+    (21, "notifyDisplayConfigurationChange"),
+    (22, "notifyDeviceStateChange"),
 ];
 
 /// android.hardware.ICameraServiceListener$Stub (descriptor android.hardware.ICameraServiceListener)

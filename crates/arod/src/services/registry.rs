@@ -1,13 +1,18 @@
 //! The session's package registry: what ARO knows about installed apps.
 //! Until the APK parser lands, entries come from the launch command line.
 use crate::aparcel as ap;
-use crate::parcelables::{ActivityInfo, ApplicationInfo, ProviderInfo, SharedLibraryInfo};
+use crate::parcelables::{
+    ActivityInfo, ApplicationInfo, ProviderInfo, ServiceInfo, SharedLibraryInfo,
+    SERVICE_FLAG_EXTERNAL_SERVICE, SERVICE_FLAG_ISOLATED_PROCESS, SERVICE_FLAG_USE_APP_ZYGOTE,
+    SERVICE_FLAG_VISIBLE_TO_INSTANT_APP,
+};
 use rsbinder::{Parcel, Result};
 use std::sync::Mutex;
 
 #[derive(Clone, Debug, Default)]
 pub struct AppSpec {
     pub package: String,
+    pub process: Option<String>,
     pub apk_in_ns: String,
     pub app_class: Option<String>,
     pub main_activity: Option<String>,
@@ -22,8 +27,10 @@ pub struct AppSpec {
     pub app_component_factory: Option<String>,
     pub activities: Vec<aro_apk::ActivityDecl>,
     pub providers: Vec<aro_apk::ProviderDecl>,
+    pub services: Vec<aro_apk::ServiceDecl>,
     pub requested_activity: Option<String>,
     pub debuggable: bool,
+    pub meta_data: Vec<(String, String)>,
 }
 
 impl AppSpec {
@@ -31,6 +38,7 @@ impl AppSpec {
     pub fn from_manifest(m: &aro_apk::Manifest, apk_in_ns: String, uid: i32) -> Self {
         AppSpec {
             package: m.package.clone(),
+            process: None,
             apk_in_ns,
             app_class: m.app_class.clone(),
             main_activity: m.main_activity().map(|a| a.name.clone()),
@@ -45,8 +53,10 @@ impl AppSpec {
             app_component_factory: m.app_component_factory.clone(),
             activities: m.activities.clone(),
             providers: m.providers.clone(),
+            services: m.services.clone(),
             requested_activity: None,
             debuggable: m.debuggable,
+            meta_data: m.app_meta_data.clone(),
         }
     }
 }
@@ -58,6 +68,35 @@ pub struct Registry {
 }
 
 impl Registry {
+    /// Shared by PackageManager queries and the framework's shared-memory cache.
+    pub fn system_feature_version(&self, name: &str) -> Option<i32> {
+        match name {
+            "android.software.webview" => self.webview_provider().map(|_| 0),
+            "android.hardware.touchscreen"
+            | "android.hardware.touchscreen.multitouch"
+            | "android.hardware.touchscreen.multitouch.distinct"
+            | "android.hardware.touchscreen.multitouch.jazzhand"
+            | "android.hardware.vulkan.level"
+            | "android.hardware.vulkan.version"
+            | "android.hardware.opengles.aep"
+            | "android.software.picture_in_picture" => Some(0),
+            _ => None,
+        }
+    }
+
+    pub fn system_feature_versions(&self) -> [i32; crate::shm::SDK_FEATURE_COUNT] {
+        crate::shm::SDK_FEATURES.map(|name| {
+            self.system_feature_version(name).unwrap_or(crate::shm::UNAVAILABLE_FEATURE_VERSION)
+        })
+    }
+
+    /// The bundled provider is usable only when its manifest names a native WebView library.
+    pub fn webview_provider(&self) -> Option<AppSpec> {
+        self.find("com.android.webview").filter(|spec| spec.meta_data.iter().any(|(key, value)| {
+            key == "com.android.webview.WebViewLibrary" && !value.is_empty()
+        }))
+    }
+
     pub fn find(&self, package: &str) -> Option<AppSpec> {
         self.apps.lock().unwrap().iter().find(|a| a.package == package).cloned()
     }
@@ -70,8 +109,9 @@ impl Registry {
         let mut ai = ApplicationInfo::default();
         ai.base.package_name = Some(spec.package.clone());
         ai.base.name = spec.app_class.clone();
+        ai.base.meta_data = spec.meta_data.clone();
         ai.class_name = spec.app_class.clone();
-        ai.process_name = Some(spec.package.clone());
+        ai.process_name = Some(spec.process.clone().unwrap_or_else(|| spec.package.clone()));
         ai.task_affinity = Some(spec.package.clone());
         ai.source_dir = Some(spec.apk_in_ns.clone());
         ai.public_source_dir = Some(spec.apk_in_ns.clone());
@@ -122,6 +162,43 @@ impl Registry {
             screen_orientation: decl.screen_orientation,
             soft_input_mode: decl.soft_input_mode,
             task_affinity: Some(decl.task_affinity.clone().unwrap_or_else(|| spec.package.clone())),
+        })
+    }
+
+    fn process_name(package: &str, process: Option<&str>) -> String {
+        match process {
+            Some(p) if p.starts_with(':') => format!("{package}{p}"),
+            Some(p) => p.to_string(),
+            None => package.to_string(),
+        }
+    }
+
+    /// android.content.pm.ServiceInfo for one of the app's declared services.
+    pub fn service_info(spec: &AppSpec, name: &str) -> Option<ServiceInfo> {
+        let decl = spec.services.iter().find(|s| s.name == name)?;
+        let mut flags = 0;
+        if decl.isolated_process {
+            flags |= SERVICE_FLAG_ISOLATED_PROCESS;
+        }
+        if decl.external_service {
+            flags |= SERVICE_FLAG_EXTERNAL_SERVICE;
+        }
+        if decl.use_app_zygote {
+            flags |= SERVICE_FLAG_USE_APP_ZYGOTE;
+        }
+        if decl.visible_to_instant_apps {
+            flags |= SERVICE_FLAG_VISIBLE_TO_INSTANT_APP;
+        }
+        Some(ServiceInfo {
+            name: decl.name.clone(),
+            package_name: spec.package.clone(),
+            application_info: Self::application_info(spec),
+            process_name: Self::process_name(&spec.package, decl.process.as_deref()),
+            enabled: decl.enabled,
+            exported: decl.exported,
+            permission: decl.permission.clone(),
+            flags,
+            foreground_service_type: decl.foreground_service_type,
         })
     }
 

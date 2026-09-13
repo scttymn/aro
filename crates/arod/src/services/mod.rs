@@ -17,6 +17,8 @@ pub mod audio_flinger;
 pub mod audio_policy;
 pub mod calendar;
 pub mod camera;
+pub mod clipboard;
+pub mod service_processes;
 pub mod compat;
 pub mod content;
 pub mod cursor;
@@ -24,8 +26,11 @@ pub mod display;
 pub mod input;
 pub mod input_codes;
 pub mod input_method;
+pub mod location;
+pub mod location_codes;
 pub mod media;
 pub mod media_player;
+pub mod media_recorder;
 pub mod modes;
 pub mod network;
 pub mod network_codes;
@@ -47,6 +52,7 @@ pub mod user;
 pub mod uimode;
 pub mod window;
 pub mod window_session;
+pub mod webview_update;
 
 use rsbinder::{Parcel, Remotable, Result, StatusCode, TransactionCode};
 

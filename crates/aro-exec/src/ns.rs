@@ -268,7 +268,15 @@ pub fn run(spec: &Spec, log: Option<&std::os::unix::net::UnixDatagram>) -> Resul
 
     if spec.session.is_some() {
         // arod already put us in the session's user and IPC namespaces.
-        unshare(CloneFlags::CLONE_NEWNS | CloneFlags::CLONE_NEWPID | CloneFlags::CLONE_NEWUTS).context("unshare")?;
+        unshare(CloneFlags::CLONE_NEWNS | CloneFlags::CLONE_NEWUTS).context("unshare")?;
+        if let Some(path) = std::env::var_os("ARO_PID_NAMESPACE") {
+            // Service processes share the app's PID namespace so Binder and
+            // Chromium agree on process IDs; each still has its own mount namespace.
+            let fd = std::fs::File::open(path).context("open app PID namespace")?;
+            nix::sched::setns(fd, CloneFlags::CLONE_NEWPID).context("join app PID namespace")?;
+        } else {
+            unshare(CloneFlags::CLONE_NEWPID).context("unshare PID namespace")?;
+        }
     } else {
         // Read our ids before unshare: inside the new namespace they read as the overflow id.
         let (uid, gid) = (nix::unistd::getuid().as_raw(), nix::unistd::getgid().as_raw());

@@ -10,6 +10,7 @@ pub mod attr {
     pub const LABEL: u32 = 0x0101_0001;
     pub const ICON: u32 = 0x0101_0002;
     pub const NAME: u32 = 0x0101_0003;
+    pub const VALUE: u32 = 0x0101_0024;
     pub const MIME_TYPE: u32 = 0x0101_0026;
     pub const SCHEME: u32 = 0x0101_0027;
     pub const HOST: u32 = 0x0101_0028;
@@ -37,6 +38,12 @@ pub mod attr {
     pub const READ_PERMISSION: u32 = 0x0101_0007;
     pub const WRITE_PERMISSION: u32 = 0x0101_0008;
     pub const PERMISSION: u32 = 0x0101_0006;
+    pub const ENABLED: u32 = 0x0101_000e;
+    pub const ISOLATED_PROCESS: u32 = 0x0101_03a9;
+    pub const EXTERNAL_SERVICE: u32 = 0x0101_050e;
+    pub const VISIBLE_TO_INSTANT_APPS: u32 = 0x0101_0531;
+    pub const USE_APP_ZYGOTE: u32 = 0x0101_055d;
+    pub const FOREGROUND_SERVICE_TYPE: u32 = 0x0101_0599;
 }
 
 #[derive(Clone, Debug, Default)]
@@ -77,6 +84,21 @@ pub struct ProviderDecl {
 }
 
 #[derive(Clone, Debug, Default)]
+pub struct ServiceDecl {
+    pub name: String,
+    /// Raw `android:process` (":sandboxed_process0", or a full name). None = app process.
+    pub process: Option<String>,
+    pub exported: bool,
+    pub enabled: bool,
+    pub permission: Option<String>,
+    pub isolated_process: bool,
+    pub external_service: bool,
+    pub visible_to_instant_apps: bool,
+    pub use_app_zygote: bool,
+    pub foreground_service_type: i32,
+}
+
+#[derive(Clone, Debug, Default)]
 pub struct Manifest {
     pub package: String,
     pub version_code: i32,
@@ -90,8 +112,11 @@ pub struct Manifest {
     pub debuggable: bool,
     pub extract_native_libs: bool,
     pub app_component_factory: Option<String>,
+    /// Literal string application metadata. Other Bundle value types are not yet supported.
+    pub app_meta_data: Vec<(String, String)>,
     pub activities: Vec<ActivityDecl>,
     pub providers: Vec<ProviderDecl>,
+    pub services: Vec<ServiceDecl>,
 }
 
 impl Manifest {
@@ -138,6 +163,11 @@ pub fn parse_manifest(data: &[u8]) -> Result<Manifest> {
         m.debuggable = app.attr(attr::DEBUGGABLE, "debuggable").and_then(|v| v.as_bool()).unwrap_or(false);
         m.extract_native_libs = app.attr(attr::EXTRACT_NATIVE_LIBS, "extractNativeLibs").and_then(|v| v.as_bool()).unwrap_or(true);
         m.app_component_factory = app.attr(attr::APP_COMPONENT_FACTORY, "appComponentFactory").and_then(|v| v.as_str()).map(String::from);
+        m.app_meta_data = app.children_named("meta-data").filter_map(|entry| {
+            let name = entry.attr(attr::NAME, "name")?.as_str()?;
+            let value = entry.attr(attr::VALUE, "value")?.as_str()?;
+            Some((name.to_string(), value.to_string()))
+        }).collect();
         for a in app.children_named("activity").chain(app.children_named("activity-alias")) {
             let Some(name) = a.attr(attr::NAME, "name").and_then(|v| v.as_str()) else { continue };
             let names = |f: &crate::axml::Element, tag: &str| -> Vec<String> {
@@ -181,6 +211,26 @@ pub fn parse_manifest(data: &[u8]) -> Result<Manifest> {
                 syncable: p.attr(attr::SYNCABLE, "syncable").and_then(|v| v.as_bool()).unwrap_or(false),
             });
         }
+        for s in app.children_named("service") {
+            let Some(name) = s.attr(attr::NAME, "name").and_then(|v| v.as_str()) else { continue };
+            let process = s.attr(attr::PROCESS, "process")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|p| !p.is_empty())
+                .map(String::from);
+            m.services.push(ServiceDecl {
+                name: qualify(&m.package, name),
+                process,
+                exported: s.attr(attr::EXPORTED, "exported").and_then(|v| v.as_bool()).unwrap_or(false),
+                enabled: s.attr(attr::ENABLED, "enabled").and_then(|v| v.as_bool()).unwrap_or(true),
+                permission: s.attr(attr::PERMISSION, "permission").and_then(|v| v.as_str()).map(String::from),
+                isolated_process: s.attr(attr::ISOLATED_PROCESS, "isolatedProcess").and_then(|v| v.as_bool()).unwrap_or(false),
+                external_service: s.attr(attr::EXTERNAL_SERVICE, "externalService").and_then(|v| v.as_bool()).unwrap_or(false),
+                visible_to_instant_apps: s.attr(attr::VISIBLE_TO_INSTANT_APPS, "visibleToInstantApps").and_then(|v| v.as_bool()).unwrap_or(false),
+                use_app_zygote: s.attr(attr::USE_APP_ZYGOTE, "useAppZygote").and_then(|v| v.as_bool()).unwrap_or(false),
+                foreground_service_type: s.attr(attr::FOREGROUND_SERVICE_TYPE, "foregroundServiceType").and_then(|v| v.as_int()).unwrap_or(0),
+            });
+        }
     }
     Ok(m)
 }
@@ -188,6 +238,16 @@ pub fn parse_manifest(data: &[u8]) -> Result<Manifest> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn application_string_metadata_and_renderer_declaration() {
+        let manifest = parse_manifest(include_bytes!("../tests/fixtures/metadata.axml")).unwrap();
+        assert_eq!(manifest.app_meta_data, vec![("com.android.webview.WebViewLibrary".into(), "libfixture.so".into())]);
+        let service = &manifest.services[0];
+        assert_eq!(service.name, "org.aro.fixture.Sandbox");
+        assert_eq!(service.process.as_deref(), Some(":renderer"));
+        assert!(service.enabled && service.exported && service.isolated_process && service.external_service);
+    }
 
     #[test]
     fn test_calendar_alias() {
@@ -199,6 +259,23 @@ mod tests {
         let alias = m.activities.iter().find(|a| a.name == "com.android.calendar.LaunchActivity");
         assert!(alias.is_some());
         assert_eq!(alias.unwrap().target_activity.as_deref(), Some("com.android.calendar.AllInOneActivity"));
+    }
+
+    #[test]
+    fn test_webview_sandboxed_process_service() {
+        let path = std::path::Path::new("/home/scttymn/.local/share/aro/system/system/product/app/webview/webview.apk");
+        if !path.exists() {
+            return;
+        }
+        let m = inspect(path).unwrap();
+        assert_eq!(m.package, "com.android.webview");
+        let svc = m.services.iter().find(|s| s.name == "org.chromium.content.app.SandboxedProcessService0");
+        let svc = svc.expect("WebView APK should declare SandboxedProcessService0");
+        assert_eq!(svc.process.as_deref(), Some(":sandboxed_process0"));
+        assert!(svc.isolated_process);
+        assert!(svc.external_service);
+        assert!(svc.exported);
+        assert!(svc.enabled);
     }
 }
 
@@ -270,4 +347,3 @@ pub fn inspect(apk: &Path) -> Result<Manifest> {
     let data = read_manifest_bytes(apk)?;
     parse_manifest(&data)
 }
-

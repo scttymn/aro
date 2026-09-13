@@ -12,9 +12,11 @@ use rsbinder::{Parcel, Result, SIBinder, TransactionCode, FLAG_ONEWAY};
 use std::sync::{Arc, Mutex};
 
 pub struct ActivityService {
+    pub host_uid: u32,
     pub registry: Arc<Registry>,
     pub compat: Arc<super::compat::PlatformCompatService>,
     pub pending: Mutex<Option<AppSpec>>,
+    pub service_processes: super::service_processes::ServiceProcesses,
     /// Attached app process: its IApplicationThread and spec.
     pub attached: Mutex<Option<(SIBinder, AppSpec)>>,
     /// IActivityClientController binder handed to launched activities.
@@ -33,8 +35,21 @@ pub struct ActivityService {
     pub activity_stack: Mutex<Vec<String>>,
     /// Running services (class name -> token binder).
     pub running_services: Mutex<std::collections::HashMap<String, SIBinder>>,
+    /// Live bindService connections, keyed by the bind token we minted.
+    pub bindings: Mutex<Vec<ServiceBinding>>,
     /// Monotonic service start counter.
     pub next_service_start_id: std::sync::atomic::AtomicI32,
+}
+
+#[derive(Clone)]
+pub struct ServiceBinding {
+    pub bind_token: SIBinder,
+    pub service_token: SIBinder,
+    pub intent: crate::parcelables::Intent,
+    pub thread: SIBinder,
+    pub connection: SIBinder,
+    pub package: String,
+    pub class: String,
 }
 
 const SCHEDULE_CREATE_SERVICE: u32 = 4; // IApplicationThread.scheduleCreateService
@@ -42,6 +57,7 @@ const SCHEDULE_STOP_SERVICE: u32 = 5; // IApplicationThread.scheduleStopService
 const BIND_APPLICATION: u32 = 6; // IApplicationThread.bindApplication (spec/transactions.rs)
 const SCHEDULE_SERVICE_ARGS: u32 = 9; // IApplicationThread.scheduleServiceArgs
 const SCHEDULE_TRANSACTION: u32 = 56; // IApplicationThread.scheduleTransaction
+const SERVICE_CONNECTION_CONNECTED: u32 = 1; // IServiceConnection.connected
 
 impl ActivityService {
     /// IApplicationThread.bindApplication, argument order from
@@ -52,12 +68,13 @@ impl ActivityService {
         display: (i32, i32, i32),
         disabled_compat: &[i64],
         enabled_compat: &[i64],
+        features: &[i32; crate::shm::SDK_FEATURE_COUNT],
     ) -> anyhow::Result<()> {
         let proxy = thread.as_proxy().ok_or_else(|| anyhow::anyhow!("IApplicationThread is not a proxy"))?;
         let mut d = proxy.prepare_transact(true)?;
         let ai = Registry::application_info(spec);
         let (w, h, dpi) = display;
-        ap::string16(&mut d, Some(&spec.package))?; // processName
+        ap::string16(&mut d, Some(spec.process.as_deref().unwrap_or(&spec.package)))?; // processName
         ap::typed(&mut d, |p| ai.write(p))?; // ApplicationInfo
         ap::string16(&mut d, None)?; // sdkSandboxClientAppVolumeUuid
         ap::string16(&mut d, None)?; // sdkSandboxClientAppPackage
@@ -96,8 +113,8 @@ impl ActivityService {
         ap::long_array(&mut d, Some(&[]))?; // mLoggableCompatChanges
         ap::boolean(&mut d, false)?; // mLogChangeChecksToStatsD
         ap::typed_none(&mut d)?; // serializedSystemFontMap SharedMemory
-        // applicationSharedMemoryFd: a zero-filled region is a valid "nothing cached" state.
-        let shm = crate::shm::application_shared_memory()?;
+        // applicationSharedMemoryFd: publish the same features as PackageManager.
+        let shm = crate::shm::application_shared_memory(features)?;
         d.write_raw_file_descriptor(std::os::fd::AsFd::as_fd(&shm))?;
         d.write_i64(0)?; // startRequestedElapsedTime
         d.write_i64(0)?; // startRequestedUptime
@@ -174,47 +191,29 @@ impl ActivityService {
     }
 
     /// Handles ACTION_OPEN_DOCUMENT / ACTION_GET_CONTENT by prompting the user with the native
-    /// desktop file picker (zenity) and delivering the selected file as an ActivityResultItem back to the calling activity.
-    pub fn open_document(&self, result_to: Option<SIBinder>, result_who: Option<String>, request_code: i32) {
+    /// desktop file-chooser portal and delivering the selected file as an ActivityResultItem back to the calling activity.
+    pub fn open_document(&self, result_to: Option<SIBinder>, result_who: Option<String>, request_code: i32, mime: Option<String>) {
         let Some(result_to) = result_to else {
             log::warn!("activity: open_document with no result_to token");
             return;
         };
         let attached = self.attached.lock().unwrap().clone();
-        let Some((thread, _spec)) = attached else {
+        let Some((thread, spec)) = attached else {
             log::warn!("activity: open_document with no attached thread");
             return;
         };
         let media_service = self.media_service.clone();
 
+        let host_uid = self.host_uid;
         std::thread::spawn(move || {
-            log::info!("activity: spawning native file picker for OPEN_DOCUMENT");
-            let output = std::process::Command::new("zenity")
-                .arg("--file-selection")
-                .arg("--title=Select Audio File")
-                .arg("--file-filter=Audio files | *.ogg *.wav *.mp3 *.flac *.m4a *.aac *.opus")
-                .output();
-
-            let (result_code, uri_str) = match output {
-                Ok(out) if out.status.success() => {
-                    let path_str = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                    if !path_str.is_empty() {
-                        let path = std::path::PathBuf::from(&path_str);
-                        log::info!("activity: picked audio file {path_str}");
-                        let item = media_service.add_custom_file(path);
-                        (-1, Some(format!("content://media/external/audio/media/{}", item.id)))
-                    } else {
-                        (0, None)
-                    }
-                }
-                Ok(out) => {
-                    log::info!("activity: file picker dismissed (exit code {:?})", out.status.code());
-                    (0, None)
-                }
-                Err(e) => {
-                    log::warn!("activity: failed to launch zenity: {e}");
-                    (0, None)
-                }
+            log::info!("activity: opening file-chooser portal");
+            let (result_code, uri_str) = match crate::portal::open_file(host_uid, &spec.package, mime.as_deref()) {
+                Ok(Some(path)) => match media_service.select_document(path) {
+                    Ok(uri) => (-1, Some(uri)),
+                    Err(e) => { log::warn!("activity: selected document unavailable: {e}"); (0, None) }
+                },
+                Ok(None) => (0, None),
+                Err(e) => { log::warn!("activity: file-chooser portal failed: {e}"); (0, None) }
             };
 
             let Some(proxy) = thread.as_proxy() else {
@@ -288,29 +287,27 @@ pub fn uri_scheme(uri: &str) -> Option<String> {
     uri.split_once(':').map(|(s, _)| s.to_ascii_lowercase())
 }
 
-/// Whether a URI scheme should be forwarded to the host (xdg-open) when not handled in-app.
+/// Whether a URI scheme should be forwarded to the host (OpenURI portal) when not handled in-app.
 pub fn is_host_bridgeable_scheme(uri: &str) -> bool {
     let scheme = uri_scheme(uri);
     matches!(scheme.as_deref(), Some("http" | "https" | "mailto" | "tel" | "geo"))
 }
 
 pub fn infer_mime_type(uri: &str) -> Option<&'static str> {
-    if uri.contains("/events/") {
-        Some("vnd.android.cursor.item/event")
-    } else if uri.contains("/events") {
-        Some("vnd.android.cursor.dir/event")
-    } else if uri.ends_with(".ogg") {
-        Some("audio/ogg")
-    } else if uri.ends_with(".mp3") {
-        Some("audio/mp3")
-    } else if uri.ends_with(".wav") {
-        Some("audio/wav")
-    } else if uri.ends_with(".png") {
-        Some("image/png")
-    } else if uri.ends_with(".jpg") || uri.ends_with(".jpeg") {
-        Some("image/jpeg")
-    } else {
-        None
+    let parsed = url::Url::parse(uri).ok();
+    let path = parsed.as_ref().map(|u| u.path()).unwrap_or(uri).to_ascii_lowercase();
+    if parsed.as_ref().is_some_and(|u| u.scheme() == "content" && u.host_str() == Some("com.android.calendar")) && path.starts_with("/time/") { return Some("time/epoch"); }
+    if path.contains("/events/") { return Some("vnd.android.cursor.item/event"); }
+    if path.ends_with("/events") { return Some("vnd.android.cursor.dir/event"); }
+    match path.rsplit('.').next()? {
+        "ogg" | "oga" => Some("audio/ogg"), "mp3" => Some("audio/mpeg"),
+        "wav" => Some("audio/wav"), "m4a" | "aac" => Some("audio/mp4"),
+        "flac" => Some("audio/flac"), "opus" => Some("audio/ogg"),
+        "png" => Some("image/png"), "jpg" | "jpeg" => Some("image/jpeg"),
+        "webp" => Some("image/webp"), "gif" => Some("image/gif"),
+        "mp4" => Some("video/mp4"), "webm" => Some("video/webm"),
+        "txt" => Some("text/plain"), "pdf" => Some("application/pdf"),
+        _ => None,
     }
 }
 
@@ -332,7 +329,8 @@ impl ActivityService {
     /// Resolve an implicit intent against a spec's activities.
     pub fn resolve(spec: &AppSpec, action: &str, data: Option<&str>) -> Option<String> {
         let scheme = data.and_then(uri_scheme);
-        let mime = data.and_then(infer_mime_type);
+        let mime = if matches!(scheme.as_deref(), Some("file" | "content")) { data.and_then(infer_mime_type) } else { None };
+        let parsed_uri = data.and_then(|d| url::Url::parse(d).ok());
         spec.activities.iter().find(|a| {
             a.filters.iter().any(|f| {
                 if !f.actions.is_empty() && !f.actions.iter().any(|x| x == action) {
@@ -341,6 +339,10 @@ impl ActivityService {
                 if !f.categories.is_empty() && !f.categories.iter().any(|c| c == "android.intent.category.DEFAULT") {
                     return false;
                 }
+                if !f.hosts.is_empty() {
+                    let host = parsed_uri.as_ref().and_then(|u| u.host_str());
+                    if !host.is_some_and(|host| f.hosts.iter().any(|pattern| pattern.strip_prefix('*').map(|tail| host.ends_with(tail)).unwrap_or(host == pattern))) { return false; }
+                }
                 match (&scheme, &mime) {
                     (Some(s), Some(m)) => {
                         let scheme_matches = if f.schemes.is_empty() {
@@ -348,15 +350,11 @@ impl ActivityService {
                         } else {
                             f.schemes.iter().any(|fs| fs == s)
                         };
-                        let mime_matches = f.mime_types.is_empty() || f.mime_types.iter().any(|fm| matches_mime(fm, m));
+                        let mime_matches = f.mime_types.iter().any(|fm| matches_mime(fm, m));
                         scheme_matches && mime_matches
                     }
                     (Some(s), None) => {
-                        if f.schemes.is_empty() {
-                            f.mime_types.is_empty() && (s == "content" || s == "file")
-                        } else {
-                            f.schemes.iter().any(|fs| fs == s)
-                        }
+                        f.mime_types.is_empty() && f.schemes.iter().any(|fs| fs == s)
                     }
                     (None, Some(m)) => {
                         f.mime_types.iter().any(|fm| matches_mime(fm, m))
@@ -397,10 +395,11 @@ impl ActivityService {
                 // If an app specifically targeted an external package with a web/external URL, route to host
                 if let Some(ref uri) = target_intent.data {
                     if is_host_bridgeable_scheme(uri) {
-                        log::info!("activity: host bridge (target external package {p:?}) -> xdg-open {uri:?}");
+                        log::info!("activity: host bridge (target external package {p:?}) -> OpenURI portal {uri:?}");
                         let uri = uri.clone();
+                        let uid = self.host_uid;
                         std::thread::spawn(move || {
-                            let _ = std::process::Command::new("xdg-open").arg(&uri).status();
+                            match crate::portal::open_uri(uid, &uri) { Ok(opened) => log::info!("activity: host URL opened={opened}"), Err(e) => log::warn!("activity: host URL failed: {e}") }
                         });
                         return;
                     }
@@ -423,10 +422,11 @@ impl ActivityService {
                         // Host intent bridge: if no in-app activity handles the URL, open on host
                         if let Some(ref uri) = target_intent.data {
                             if is_host_bridgeable_scheme(uri) {
-                                log::info!("activity: host bridge (unhandled {act:?}) -> xdg-open {uri:?}");
+                                log::info!("activity: host bridge (unhandled {act:?}) -> OpenURI portal {uri:?}");
                                 let uri = uri.clone();
+                                let uid = self.host_uid;
                                 std::thread::spawn(move || {
-                                    let _ = std::process::Command::new("xdg-open").arg(&uri).status();
+                                    match crate::portal::open_uri(uid, &uri) { Ok(opened) => log::info!("activity: host URL opened={opened}"), Err(e) => log::warn!("activity: host URL failed: {e}") }
                                 });
                                 return;
                             }
@@ -473,17 +473,35 @@ impl ActivityService {
     }
 
 
-    pub fn start_service(&self, target: &crate::pending_intent::Target) {
+    fn service_info_for(&self, spec: &AppSpec, target: &crate::pending_intent::Target, target_class: &str) -> crate::parcelables::ServiceInfo {
+        target.package.as_deref()
+            .and_then(|p| self.registry.find(p))
+            .and_then(|s| Registry::service_info(&s, target_class))
+            .unwrap_or_else(|| crate::parcelables::ServiceInfo {
+                name: target_class.to_string(),
+                package_name: spec.package.clone(),
+                application_info: Registry::application_info(spec),
+                process_name: spec.package.clone(),
+                enabled: true,
+                exported: true,
+                permission: None,
+                flags: 0,
+                foreground_service_type: 0,
+            })
+    }
+
+    /// Create the service in the attached process if it isn't running yet.
+    fn ensure_service(&self, target: &crate::pending_intent::Target) -> Option<(SIBinder, SIBinder, String)> {
         let attached = self.attached.lock().unwrap().clone();
         let (Some((thread, spec)), Some(target_class)) = (attached, target.class.as_deref()) else {
-            log::warn!("activity: start_service cannot dispatch (attached or class missing): {target:?}");
-            return;
+            log::warn!("activity: ensure_service cannot dispatch (attached or class missing): {target:?}");
+            return None;
         };
         let proxy = match thread.as_proxy() {
             Some(p) => p,
             None => {
                 log::error!("activity: IApplicationThread is not a proxy");
-                return;
+                return None;
             }
         };
 
@@ -498,23 +516,14 @@ impl ActivityService {
         };
         drop(services);
 
-        let service_info = crate::parcelables::ServiceInfo {
-            name: target_class.to_string(),
-            package_name: spec.package.clone(),
-            application_info: Registry::application_info(&spec),
-            process_name: spec.package.clone(),
-            permission: None,
-            flags: 0,
-            foreground_service_type: 0,
-        };
-
         if is_new {
-            log::info!("activity: scheduleCreateService for {target_class}");
+            let service_info = self.service_info_for(&spec, target, target_class);
+            log::info!("activity: scheduleCreateService for {target_class} flags=0x{:x}", service_info.flags);
             let mut d = match proxy.prepare_transact(true) {
                 Ok(d) => d,
                 Err(e) => {
                     log::error!("activity: prepare_transact scheduleCreateService failed: {e:#}");
-                    return;
+                    return None;
                 }
             };
             if let Err(e) = (|| -> Result<()> {
@@ -525,14 +534,23 @@ impl ActivityService {
                 Ok(())
             })() {
                 log::error!("activity: marshalling scheduleCreateService failed: {e:#}");
-                return;
+                return None;
             }
             if let Err(e) = proxy.submit_transact(SCHEDULE_CREATE_SERVICE, &d, FLAG_ONEWAY) {
                 log::error!("activity: scheduleCreateService failed: {e:#}");
-                return;
+                return None;
             }
         }
 
+        Some((thread, token, target_class.to_string()))
+    }
+
+    pub fn start_service(&self, target: &crate::pending_intent::Target) {
+        let Some((thread, token, target_class)) = self.ensure_service(target) else { return };
+        let proxy = match thread.as_proxy() {
+            Some(p) => p,
+            None => return,
+        };
         let start_id = self.next_service_start_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let intent = target.to_intent();
         log::info!("activity: scheduleServiceArgs for {target_class} (start_id={start_id}, action={:?})", intent.action);
@@ -568,7 +586,54 @@ impl ActivityService {
         }
     }
 
+    /// Bind a service that runs in the main app process.
+    pub fn bind_service(&self, target: &crate::pending_intent::Target, connection: SIBinder) -> bool {
+        let Some((thread, token, _)) = self.ensure_service(target) else { return false };
+        match self.send_service_binding(&thread, &token, target, connection) {
+            Ok(()) => true,
+            Err(e) => { log::error!("activity: bindService failed: {e:#}"); false }
+        }
+    }
+
+    fn publish_bound_service(&self, bind_token: &SIBinder, service: SIBinder) {
+        let binding = self.bindings.lock().unwrap().iter().find(|b| &b.bind_token == bind_token).cloned();
+        let Some(binding) = binding else {
+            log::warn!("activity: publishService for unknown bind token");
+            return;
+        };
+        let Some(proxy) = binding.connection.as_proxy() else {
+            log::error!("activity: IServiceConnection is not a proxy");
+            return;
+        };
+        log::info!("activity: IServiceConnection.connected {}/{}", binding.package, binding.class);
+        let mut d = match proxy.prepare_transact(true) {
+            Ok(d) => d,
+            Err(e) => {
+                log::error!("activity: prepare_transact IServiceConnection.connected failed: {e:#}");
+                return;
+            }
+        };
+        if let Err(e) = (|| -> Result<()> {
+            ap::typed(&mut d, |p| crate::parcelables::write_component_name(p, Some(&binding.package), Some(&binding.class)))?;
+            d.write(&Some(service))?;
+            d.write(&None::<SIBinder>)?; // IBinderSession
+            ap::boolean(&mut d, false)?; // dead
+            Ok(())
+        })() {
+            log::error!("activity: marshalling IServiceConnection.connected failed: {e:#}");
+            return;
+        }
+        if let Err(e) = proxy.submit_transact(SERVICE_CONNECTION_CONNECTED, &d, FLAG_ONEWAY) {
+            log::error!("activity: IServiceConnection.connected failed: {e:#}");
+        }
+    }
+
     pub fn stop_service(&self, token: &SIBinder) {
+        // stopSelf clears the started state; a bound service must remain alive.
+        let pending_bind = self.service_processes.processes.lock().unwrap().values().any(|p| p.is_bound_token(token));
+        if pending_bind || self.bindings.lock().unwrap().iter().any(|b| &b.service_token == token) {
+            return;
+        }
         let mut services = self.running_services.lock().unwrap();
         services.retain(|k, v| {
             if v == token {
@@ -596,15 +661,35 @@ impl ActivityService {
                 let pid = rsbinder::thread_state::get_calling_pid();
                 log::info!("activity: attachApplication from pid {pid}, seq {start_seq}");
                 ap::no_exception(reply)?;
+                if start_seq != 0 {
+                    if let Some(thread) = thread {
+                        let mut processes = self.service_processes.processes.lock().unwrap();
+                        if let Some(process) = processes.get_mut(&start_seq) {
+                            process.thread = Some(thread.clone());
+                            let spec = process.spec.clone();
+                            let display = self.registry.display;
+                            let features = self.registry.system_feature_versions();
+                            let (disabled, enabled) = self.compat.compute_compat_changes(spec.target_sdk);
+                            std::thread::spawn(move || {
+                                if let Err(e) = Self::bind_application(&thread, &spec, display, &disabled, &enabled, &features) {
+                                    log::error!("activity: service process bindApplication failed: {e:#}");
+                                }
+                            });
+                        }
+                    }
+                    return Ok(true);
+                }
+                self.service_processes.app_pid.store(pid, std::sync::atomic::Ordering::Release);
                 if let (Some(thread), Some(spec)) = (thread, self.pending.lock().unwrap().take()) {
                     *self.attached.lock().unwrap() = Some((thread.clone(), spec.clone()));
                     // Outbound call after we have replied: do it on another thread.
                     let display = self.registry.display;
+                    let features = self.registry.system_feature_versions();
                     let (disabled_compat, enabled_compat) = self.compat.compute_compat_changes(spec.target_sdk);
                     log::info!("compat: computed {} disabled, {} enabled changes for {} (target sdk {})",
                         disabled_compat.len(), enabled_compat.len(), spec.package, spec.target_sdk);
                     std::thread::spawn(move || {
-                        if let Err(e) = Self::bind_application(&thread, &spec, display, &disabled_compat, &enabled_compat) {
+                        if let Err(e) = Self::bind_application(&thread, &spec, display, &disabled_compat, &enabled_compat, &features) {
                             log::error!("activity: bindApplication failed: {e:#}");
                         } else {
                             log::info!("activity: bindApplication sent to {}", spec.package);
@@ -614,10 +699,16 @@ impl ActivityService {
                 Ok(true)
             }
             "finishAttachApplication" => {
-                let _seq = data.read_i64()?;
+                let seq = data.read_i64()?;
                 let _oncreate_ns = data.read_i64()?;
                 log::info!("activity: finishAttachApplication (Application.onCreate done)");
                 ap::no_exception(reply)?;
+                if seq != 0 {
+                    if let Err(e) = self.finish_service_attach(seq) {
+                        log::error!("activity: service process attach failed: {e:#}");
+                    }
+                    return Ok(true);
+                }
                 // The process is up: launch its main activity, as ActivityTaskManager would.
                 let attached = self.attached.lock().unwrap().clone();
                 let controller = self.client_controller.lock().unwrap().clone();
@@ -869,6 +960,12 @@ impl ActivityService {
                 Ok(true)
             }
             "frozenBinderTransactionDetected" => Ok(true), // oneway
+            "addPackageDependency" => {
+                let pkg: Option<String> = data.read()?;
+                log::info!("activity: addPackageDependency {pkg:?}");
+                ap::no_exception(reply)?;
+                Ok(true)
+            }
             "handleApplicationCrash" => {
                 let _app: Option<SIBinder> = data.read()?;
                 let present = data.read_i32()?;
@@ -928,6 +1025,66 @@ impl ActivityService {
                 self.start_service(&target);
                 ap::no_exception(reply)?;
                 ap::typed(reply, |p| crate::parcelables::write_component_name(p, target.package.as_deref(), target.class.as_deref()))?;
+                Ok(true)
+            }
+            "bindService" | "bindServiceInstance" => {
+                let _caller: Option<SIBinder> = data.read()?;
+                let _activity_token: Option<SIBinder> = data.read()?;
+                let has_intent = data.read_i32()?;
+                let mut target = crate::pending_intent::Target::default();
+                if has_intent != 0 {
+                    target = crate::pending_intent::read_intent_target(data)?;
+                }
+                let _resolved_type: Option<String> = data.read()?;
+                let connection: Option<SIBinder> = data.read()?;
+                let flags = data.read_i64()?;
+                let instance: Option<String> = if name == "bindServiceInstance" { data.read()? } else { None };
+                let calling_pkg: Option<String> = data.read()?;
+                let _user = data.read_i32()?;
+                log::info!("activity: {name} flags=0x{flags:x} instance={instance:?} calling={calling_pkg:?} -> {target:?}");
+                let ok = match connection {
+                    Some(conn) => {
+                        let isolated = target.package.as_deref().and_then(|p| self.registry.find(p))
+                            .and_then(|spec| Registry::service_info(&spec, target.class.as_deref().unwrap_or("")))
+                            .is_some_and(|info| info.flags & crate::parcelables::SERVICE_FLAG_ISOLATED_PROCESS != 0);
+                        let other_package = target.package.as_deref() != calling_pkg.as_deref();
+                        if isolated || other_package {
+                            match self.bind_remote_service(&target, conn, instance.as_deref(),
+                                calling_pkg.as_deref().unwrap_or(""), flags & 0x80000000 != 0) {
+                                Ok(ok) => ok,
+                                Err(e) => { log::error!("activity: service process bind failed: {e:#}"); false }
+                            }
+                        } else { self.bind_service(&target, conn) }
+                    },
+                    None => {
+                        log::warn!("activity: {name} missing IServiceConnection");
+                        false
+                    }
+                };
+                ap::no_exception(reply)?;
+                reply.write_i32(if ok { 1 } else { 0 })?;
+                Ok(true)
+            }
+            "publishService" => {
+                let _token: Option<SIBinder> = data.read()?;
+                let bind_token: Option<SIBinder> = data.read()?;
+                let service: Option<SIBinder> = data.read()?;
+                log::info!("activity: publishService bind={bind_token:?} service={service:?}");
+                if let (Some(bind_token), Some(service)) = (bind_token, service) {
+                    self.publish_bound_service(&bind_token, service);
+                }
+                ap::no_exception(reply)?;
+                Ok(true)
+            }
+            "unbindService" => {
+                let conn: Option<SIBinder> = data.read()?;
+                if let Some(conn) = conn {
+                    if let Err(e) = self.unbind_service_connection(&conn) {
+                        log::error!("activity: unbindService failed: {e:#}");
+                    }
+                }
+                ap::no_exception(reply)?;
+                ap::boolean(reply, true)?;
                 Ok(true)
             }
             "stopServiceToken" => {
@@ -1025,3 +1182,22 @@ mod tests {
     }
 }
 
+
+#[cfg(test)]
+mod intent_data_tests {
+    use super::*;
+    #[test]
+    fn empty_filter_does_not_claim_files_and_hosts_are_respected() {
+        let mut filter = aro_apk::IntentFilter { actions: vec!["android.intent.action.VIEW".into()], categories: vec!["android.intent.category.DEFAULT".into()], ..Default::default() };
+        let resolve = |f: aro_apk::IntentFilter, uri: &str| {
+            let spec = AppSpec { activities: vec![aro_apk::ActivityDecl { name: "Activity".into(), filters: vec![f], ..Default::default() }], ..Default::default() };
+            ActivityService::resolve(&spec,"android.intent.action.VIEW",Some(uri))
+        };
+        assert!(resolve(filter.clone(),"file:///sdcard/test.wav").is_none());
+        filter.schemes=vec!["file".into()]; filter.mime_types=vec!["audio/*".into()];
+        assert!(resolve(filter.clone(),"file:///sdcard/UPPER.WAV").is_some());
+        filter.schemes=vec!["https".into()]; filter.mime_types.clear(); filter.hosts=vec!["example.org".into()];
+        assert!(resolve(filter.clone(),"https://example.org/test.wav").is_some());
+        assert!(resolve(filter,"https://other.org/test.wav").is_none());
+    }
+}

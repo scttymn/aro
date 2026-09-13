@@ -1,0 +1,8 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="org.aro.fixture">
+    <application>
+        <meta-data android:name="com.android.webview.WebViewLibrary" android:value="libfixture.so" />
+        <meta-data android:name="fixture.boolean" android:value="true" />
+        <meta-data android:name="fixture.resource" android:resource="@android:string/ok" />
+        <service android:name=".Sandbox" android:process=":renderer" android:exported="true" android:isolatedProcess="true" android:externalService="true" />
+    </application>
+</manifest>

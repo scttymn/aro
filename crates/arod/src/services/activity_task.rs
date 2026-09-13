@@ -29,7 +29,7 @@ impl Service for ActivityTaskService {
                 let _feature: Option<String> = data.read()?;     // String16
                 if data.read_i32()? != 0 {
                     let target = crate::pending_intent::read_intent_target(data)?;
-                    let _resolved_type: Option<String> = data.read().ok().flatten();
+                    let resolved_type: Option<String> = data.read().ok().flatten();
                     let result_to: Option<SIBinder> = data.read().ok().flatten();
                     let result_who: Option<String> = data.read().ok().flatten();
                     let request_code: i32 = data.read_i32().unwrap_or(0);
@@ -40,7 +40,7 @@ impl Service for ActivityTaskService {
                     if target.action.as_deref() == Some("android.intent.action.OPEN_DOCUMENT")
                         || target.action.as_deref() == Some("android.intent.action.GET_CONTENT")
                     {
-                        self.activity.open_document(result_to, result_who, request_code);
+                        self.activity.open_document(result_to, result_who, request_code, resolved_type);
                     } else {
                         self.activity.start_activity_target(target);
                     }

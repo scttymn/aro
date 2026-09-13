@@ -77,6 +77,9 @@ fn main() -> Result<()> {
                 argv.extend(c);
             } else if app {
                 argv.push("--app".into());
+                if let Ok(seq) = std::env::var("ARO_START_SEQ") {
+                    argv.push(format!("seq={seq}"));
+                }
             } else {
                 argv.push(apk_in);
                 argv.push(class.ok_or_else(|| anyhow::anyhow!("class required (or --app)"))?);

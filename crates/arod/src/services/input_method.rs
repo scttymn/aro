@@ -23,7 +23,7 @@ impl Service for InputMethodService {
             }
             "getInputMethodList" | "getEnabledInputMethodList" | "getEnabledInputMethodSubtypeList" => {
                 ap::no_exception(reply)?;
-                ap::null_array(reply)?; // List<InputMethodInfo>: null (Java treats as empty)
+                ap::typed_none(reply)?; // InputMethodInfoSafeList / InputMethodSubtypeSafeList: null TypedObject
                 Ok(true)
             }
             "getCurrentInputMethodInfoAsUser" | "getLastInputMethodSubtype" | "getCurrentInputMethodSubtype" => {

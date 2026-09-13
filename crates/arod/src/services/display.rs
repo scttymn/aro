@@ -65,7 +65,7 @@ impl DisplayService {
         ap::string16(p, None)?; // frameRateCategoryRate: writeParcelable(null)
         p.write_i32(1)?; // supportedRefreshRates.length
         p.write_f32(60.0)?;
-        ap::null_array(p)?; // frameRateVelocityMapping typed list: null
+        p.write_i32(0)?; // frameRateVelocityMapping: empty typed list (null NPEs Display.getFrameRateVelocityMapping)
         p.write_i32(1)?; // defaultModeId
         p.write_i32(0)?; // userPreferredModeId
         p.write_i32(1)?; // supportedModes.length

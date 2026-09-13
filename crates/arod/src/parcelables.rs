@@ -13,6 +13,7 @@ pub struct PackageItemInfo {
     pub non_localized_label: Option<String>,
     pub icon: i32,
     pub logo: i32,
+    pub meta_data: Vec<(String, String)>,
     pub banner: i32,
     pub show_user_icon: i32,
     pub is_archived: bool,
@@ -26,7 +27,12 @@ impl PackageItemInfo {
         ap::char_sequence(p, self.non_localized_label.as_deref())?;
         p.write_i32(self.icon)?;
         p.write_i32(self.logo)?;
-        ap::null_array(p)?; // metaData Bundle
+        if self.meta_data.is_empty() {
+            ap::null_array(p)?; // metaData Bundle (null = -1)
+        } else {
+            let map: Vec<(&str, Option<&str>)> = self.meta_data.iter().map(|(k, v)| (k.as_str(), Some(v.as_str()))).collect();
+            crate::bundle::write_string_bundle(p, &map)?;
+        }
         p.write_i32(self.banner)?;
         p.write_i32(self.show_user_icon)?;
         ap::boolean(p, self.is_archived)
@@ -490,6 +496,12 @@ impl Intent {
     }
 }
 
+/// android.content.pm.ServiceInfo.flags
+pub const SERVICE_FLAG_ISOLATED_PROCESS: i32 = 0x0000_0002;
+pub const SERVICE_FLAG_EXTERNAL_SERVICE: i32 = 0x0000_0004;
+pub const SERVICE_FLAG_USE_APP_ZYGOTE: i32 = 0x0000_0008;
+pub const SERVICE_FLAG_VISIBLE_TO_INSTANT_APP: i32 = 0x0010_0000;
+
 /// android.content.pm.ServiceInfo
 #[derive(Clone, Debug)]
 pub struct ServiceInfo {
@@ -497,6 +509,8 @@ pub struct ServiceInfo {
     pub package_name: String,
     pub application_info: ApplicationInfo,
     pub process_name: String,
+    pub enabled: bool,
+    pub exported: bool,
     pub permission: Option<String>,
     pub flags: i32,
     pub foreground_service_type: i32,
@@ -506,7 +520,7 @@ impl ServiceInfo {
     pub fn write(&self, p: &mut Parcel) -> Result<()> {
         // ComponentInfo
         ap::string8(p, Some(&self.name))?;
-        p.write_i32(1 | 2)?; // enabled | exported
+        p.write_i32(i32::from(self.enabled) | if self.exported { 2 } else { 0 })?; // enabled | exported; no fields omitted
         ap::string8(p, Some(&self.package_name))?; // packageName
         p.write_i32(0)?; // labelRes
         ap::char_sequence(p, None)?; // nonLocalizedLabel

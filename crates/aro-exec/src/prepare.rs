@@ -140,6 +140,8 @@ pub fn write_properties(system: &Path, state: &Path, extra: &[(String, String)])
         // Window extensions (androidx.window.extensions on system_ext) are present in the image;
         // the framework initialises them for every app when this is set, as on real devices.
         ("persist.wm.extensions.enabled", "true"),
+        // Enable memfd for shared memory (ashmem is deprecated and absent on modern Linux kernels).
+        ("sys.use_memfd", "true"),
     ] {
         props.push((k.to_string(), v.to_string()));
     }

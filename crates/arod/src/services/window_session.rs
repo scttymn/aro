@@ -114,11 +114,11 @@ impl WindowHost {
         if let Some(top) = windows.last() {
             if let Ok(dup) = top.input_tx.try_clone() {
                 log::info!("window: set active input channel to layer {}", top.layer.id);
-                *self.input.fd.lock().unwrap() = Some(dup);
+                self.input.select_channel(Some(dup), top.layer.id);
                 return;
             }
         }
-        *self.input.fd.lock().unwrap() = None;
+        self.input.select_channel(None, 0);
     }
 
     fn find_layer(&self, window: &SIBinder) -> Option<Arc<Layer>> {
@@ -313,10 +313,6 @@ impl Service for WindowSession {
                     return Err(rsbinder::StatusCode::Unknown);
                 }
                 let (ours, theirs) = unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) };
-                // Publish the server end so the compositor can inject input events.
-                if let Ok(dup) = ours.try_clone() {
-                    *host.input.fd.lock().unwrap() = Some(dup);
-                }
                 let token = super::token::new_token("input-channel");
                 log::info!("window: addToDisplay -> layer {} (child={is_child} dialog={is_dialog}) with input channel", layer.id);
                 ap::no_exception(reply)?;
